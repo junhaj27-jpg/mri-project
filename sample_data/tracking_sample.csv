@@ -1,0 +1,13 @@
+study_label,volume_cm3,change_cm3,change_rate_percent,event_type
+T01,52.8,,,
+T02,50.1,-2.7,-5.11,surgery_follow_up
+T03,48.7,-1.4,-2.79,surgery_follow_up
+T04,45.3,-3.4,-6.98,surgery_follow_up
+T05,44.9,-0.4,-0.88,hospital_transition
+T06,42.0,-2.9,-6.46,chemo_period_estimated
+T07,40.8,-1.2,-2.86,chemo_period_estimated
+T08,39.4,-1.4,-3.43,post_gamma_knife_follow_up
+T09,39.1,-0.3,-0.76,stable_follow_up
+T10,38.9,-0.2,-0.51,stable_follow_up
+T11,38.7,-0.2,-0.51,stable_follow_up
+T12,38.5,-0.2,-0.52,stable_follow_up

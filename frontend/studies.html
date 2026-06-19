@@ -1,0 +1,4 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MRI Studies</title><link rel="stylesheet" href="/static/css/style.css"></head><body>
+<header class="header"><nav class="nav"><a class="brand" href="/">mri-project</a><div class="menu"><a href="/">대시보드</a><a href="/studies" class="active">MRI 목록</a><a href="/viewer">2D 뷰어</a><a href="/volume">부피</a><a href="/three-d">3D 뷰어</a></div></nav></header>
+<main class="container"><div class="card"><h1>MRI 시점 목록</h1><p>T01~T12 비식별 시점 라벨로 MRI 데이터를 관리합니다.</p><div class="table-wrap"><table><thead><tr><th>시점</th><th>구간</th><th>이벤트</th><th>병원 가명</th><th>부피(cm³)</th><th>메모</th></tr></thead><tbody id="studyRows"></tbody></table></div><p class="notice">T04~T05 구간은 병원 또는 장비 변경 가능성이 있으므로 직접적인 치료 효과 판단 구간으로 사용하지 않습니다.</p></div></main>
+<script src="/static/js/common.js"></script><script src="/static/js/studies.js"></script></body></html>

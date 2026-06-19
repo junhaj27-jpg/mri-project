@@ -1,0 +1,7 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>3D Viewer</title><link rel="stylesheet" href="/static/css/style.css"></head><body>
+<header class="header"><nav class="nav"><a class="brand" href="/">mri-project</a><div class="menu"><a href="/">대시보드</a><a href="/studies">MRI 목록</a><a href="/viewer">2D 뷰어</a><a href="/volume">부피</a><a href="/three-d" class="active">3D 뷰어</a></div></nav></header>
+<main class="container"><section class="grid two"><div class="card"><h1>3D 병변 모델 뷰어</h1><p>Three.js 기반으로 GLB 모델을 로딩합니다. 실제 lesion_model.glb를 media/models/P001/T08/ 경로에 넣으면 표시됩니다.</p><label>모델 URL</label><input id="modelUrl" value="/media/models/P001/T08/lesion_model.glb"><div class="actions"><button class="btn" id="loadModelBtn">모델 로딩</button><button class="btn secondary" id="sampleBtn">샘플 도형 보기</button></div><p class="notice">터치/마우스로 회전, 확대, 축소가 가능합니다.</p></div><div id="threeCanvasWrap"></div></section></main>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="/static/js/three_viewer.js"></script></body></html>
