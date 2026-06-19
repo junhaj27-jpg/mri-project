@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 MEDIA_DIR = BASE_DIR / "media"
 ASSETS_DIR = BASE_DIR / "assets"
+MRI_DIR = BASE_DIR / "mri"
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,6 +32,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR / "static"), name="static")
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+app.mount("/mri", StaticFiles(directory=MRI_DIR), name="mri")
 
 app.include_router(studies.router, prefix="/api/studies", tags=["studies"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
