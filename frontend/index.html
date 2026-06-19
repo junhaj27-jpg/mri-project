@@ -11,8 +11,11 @@
   <header class="header"><nav class="nav"><a class="brand" href="/"><img class="brand-icon" src="/mri/mri.jpg" alt="">mri-project</a><div class="menu"><a href="/" class="active">대시보드</a><a href="/studies">MRI 목록</a><a href="/viewer">2D 뷰어</a><a href="/volume">부피</a><a href="/three-d">3D 뷰어</a></div></nav></header>
   <main class="container">
     <section class="hero">
-      <div class="card">
-        <span class="badge">Research Prototype</span>
+      <div class="card hero-copy">
+        <div class="title-row">
+          <img class="title-icon" src="/mri/mri.jpg" alt="">
+          <span class="badge">Research Prototype</span>
+        </div>
         <h1>Brain MRI 3D Visualization & Volume Measurement Web Service</h1>
         <p>Brain MRI 기반 3D 병변 시각화 및 segmentation mask 기반 부피 계산 웹서비스입니다. 원본 DICOM/NIfTI 파일은 공개 저장소에 올리지 않고, 비식별 분석 결과만 조회합니다.</p>
         <div class="actions">
@@ -22,9 +25,17 @@
         </div>
         <p class="notice">본 시스템은 의료진 진단을 대체하지 않는 연구용/포트폴리오용 프로토타입입니다.</p>
       </div>
-      <div class="card">
+      <div class="card visual-card">
+        <div class="hero-image-wrap">
+          <img class="hero-image" src="/mri/mri.jpg" alt="MRI scanner illustration">
+        </div>
         <h2>핵심 흐름</h2>
         <p>DICOM/CD 정리 → NIfTI 변환 → 2D slice 확인 → mask overlay → voxel 기반 cm³ 부피 계산 → 3D mesh 생성 → PC/모바일 웹 확인</p>
+        <div class="icon-strip" aria-label="MRI workflow">
+          <span class="icon-pill"><img src="/mri/mri.jpg" alt="">2D</span>
+          <span class="icon-pill"><img src="/mri/mri.jpg" alt="">Mask</span>
+          <span class="icon-pill"><img src="/mri/mri.jpg" alt="">3D</span>
+        </div>
         <div class="grid two">
           <div><div class="stat" id="studyCount">-</div><div class="small">등록 시점</div></div>
           <div><div class="stat" id="latestVolume">-</div><div class="small">최근 부피 cm³</div></div>
@@ -32,9 +43,9 @@
       </div>
     </section>
     <section class="grid">
-      <div class="card"><h2>FastAPI</h2><p>REST API, 정적 페이지 제공, SQLite 분석 결과 조회를 담당합니다.</p></div>
-      <div class="card"><h2>Medical Image</h2><p>pydicom, nibabel, SimpleITK, NumPy 기반 변환 및 계산 구조를 포함합니다.</p></div>
-      <div class="card"><h2>Three.js</h2><p>GLB 모델을 로딩하여 PC/모바일에서 회전, 확대, 축소를 지원합니다.</p></div>
+      <div class="card feature-card"><div class="feature-icon"><img src="/mri/mri.jpg" alt=""></div><h2>FastAPI</h2><p>REST API, 정적 페이지 제공, SQLite 분석 결과 조회를 담당합니다.</p></div>
+      <div class="card feature-card"><div class="feature-icon"><img src="/mri/mri.jpg" alt=""></div><h2>Medical Image</h2><p>pydicom, nibabel, SimpleITK, NumPy 기반 변환 및 계산 구조를 포함합니다.</p></div>
+      <div class="card feature-card"><div class="feature-icon"><img src="/mri/mri.jpg" alt=""></div><h2>Three.js</h2><p>GLB 모델을 로딩하여 PC/모바일에서 회전, 확대, 축소를 지원합니다.</p></div>
     </section>
   </main>
   <script src="/static/js/common.js"></script>
