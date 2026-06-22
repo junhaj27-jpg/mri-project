@@ -12,11 +12,21 @@ mri_data/
 raw_private/
 encrypted/
 decrypted_test/
+data/private/
+data/dicom/
+data/nifti/
+outputs/private/
 
 # medical image files
 *.dcm
+*.dicom
+*.ima
 *.nii
 *.nii.gz
+*.nrrd
+*.mha
+*.mhd
+*.mgz
 *.npy
 *.npz
 
@@ -28,6 +38,24 @@ media/overlays/
 media/masks/
 media/models/
 media/reports/
+outputs/**/*.csv
+outputs/**/*.json
+outputs/**/*.xlsx
+outputs/**/*.nii
+outputs/**/*.nii.gz
+outputs/**/*.npy
+outputs/**/*.npz
+outputs/**/*.glb
+outputs/**/*.gltf
+
+# generated 3D and mask artifacts
+*.glb
+*.gltf
+*mask*.png
+*mask*.nii
+*mask*.nii.gz
+*volume_result*.csv
+*volume_result*.json
 
 # encrypted files
 *.enc

@@ -8,7 +8,19 @@
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
-  <header class="header"><nav class="nav"><a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a><div class="menu"><a href="/" class="active">대시보드</a><a href="/studies">MRI 목록</a><a href="/viewer">2D 뷰어</a><a href="/volume">부피</a><a href="/three-d">3D 뷰어</a></div></nav></header>
+  <header class="header">
+    <nav class="nav">
+      <a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a>
+      <div class="menu">
+        <a href="/" class="active">대시보드</a>
+        <a href="/studies">MRI 목록</a>
+        <a href="/viewer">2D 뷰어</a>
+        <a href="/volume">부피</a>
+        <a href="/three-d">3D 뷰어</a>
+      </div>
+    </nav>
+  </header>
+
   <main class="container">
     <section class="hero">
       <div class="card hero-copy">
@@ -17,52 +29,84 @@
           <span class="badge">Research Prototype</span>
         </div>
         <h1>Brain MRI 3D Visualization & Volume Measurement Web Service</h1>
-        <p>Brain MRI 기반 3D 병변 시각화 및 segmentation mask 기반 부피 계산 웹서비스입니다. 원본 DICOM/NIfTI 파일은 공개 저장소에 올리지 않고, 비식별 분석 결과만 조회합니다.</p>
+        <p>공개 저장소에는 코드, 공개 가능한 데모 이미지, mock longitudinal data만 포함합니다. 실제 DICOM/NIfTI 원본과 3D 분석 산출물은 비공개 로컬 환경에서만 사용합니다.</p>
         <div class="actions">
           <a class="btn" href="/studies">MRI 시점 보기</a>
-          <a class="btn secondary" href="/three-d">3D 모델 확인</a>
-          <button class="btn secondary" id="seedBtn">샘플 데이터 생성</button>
+          <a class="btn secondary" href="/three-d">3D 뷰어 확인</a>
+          <button class="btn secondary" id="seedBtn">Mock 데이터 생성</button>
         </div>
-        <p class="notice">본 시스템은 의료진 진단을 대체하지 않는 연구용/포트폴리오용 프로토타입입니다.</p>
+        <p class="notice">본 시스템은 연구용 분석 보조 프로토타입이며 의료진의 진단을 대체하지 않습니다.</p>
       </div>
+
       <div class="card visual-card">
         <div class="hero-image-wrap">
-          <img class="hero-image" src="/assets/mri-banner.png" data-fallback="/assets/mri-icon.jpg" alt="MRI scanner illustration">
+          <img class="hero-image" src="/assets/mri-banner.png" data-fallback="/assets/mri-icon.jpg" alt="MRI demo image">
         </div>
-        <h2>핵심 흐름</h2>
-        <p>DICOM/CD 정리 → NIfTI 변환 → 2D slice 확인 → mask overlay → voxel 기반 cm³ 부피 계산 → 3D mesh 생성 → PC/모바일 웹 확인</p>
+        <h2>데이터 흐름</h2>
+        <p>Demo Mode는 Kaggle 2D demo와 mock tracking만 보여줍니다. Private Analysis Mode는 로컬 private DICOM/NIfTI volume을 입력으로 받아 3D mesh와 부피 결과를 생성합니다.</p>
         <div class="icon-strip" aria-label="MRI workflow">
-          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">2D</span>
-          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">Mask</span>
-          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">3D</span>
+          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">2D Demo</span>
+          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">Private Volume</span>
+          <span class="icon-pill"><img src="/assets/mri-icon.jpg" alt="">3D Mesh</span>
         </div>
         <div class="grid two">
           <div><div class="stat" id="studyCount">-</div><div class="small">등록 시점</div></div>
-          <div><div class="stat" id="latestVolume">-</div><div class="small">최근 부피 cm³</div></div>
+          <div><div class="stat" id="latestVolume">-</div><div class="small">최근 부피 cm3</div></div>
         </div>
       </div>
     </section>
+
+    <section class="mode-grid">
+      <div class="mode-card">
+        <span class="mode-chip demo">Demo Mode</span>
+        <h2>공개 저장소용 데모</h2>
+        <p>Kaggle 2D demo 이미지와 mock longitudinal data만 사용합니다. 이 모드는 화면 시연과 UI 흐름 확인용이며 실제 3D 부피 계산 입력으로 사용하지 않습니다.</p>
+      </div>
+      <div class="mode-card private">
+        <span class="mode-chip private">Private Analysis Mode</span>
+        <h2>비공개 로컬 분석</h2>
+        <p>실제 DICOM/NIfTI volume, segmentation mask, GLB mesh, volume result는 `data/private`, `data/dicom`, `data/nifti`, `outputs/private` 같은 로컬 폴더에서만 사용합니다.</p>
+      </div>
+    </section>
+
     <section class="grid">
-      <div class="card feature-card"><div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div><h2>FastAPI</h2><p>REST API, 정적 페이지 제공, SQLite 분석 결과 조회를 담당합니다.</p></div>
-      <div class="card feature-card"><div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div><h2>Medical Image</h2><p>pydicom, nibabel, SimpleITK, NumPy 기반 변환 및 계산 구조를 포함합니다.</p></div>
-      <div class="card feature-card"><div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div><h2>Three.js</h2><p>GLB 모델을 로딩하여 PC/모바일에서 회전, 확대, 축소를 지원합니다.</p></div>
+      <div class="card feature-card">
+        <div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div>
+        <h2>FastAPI</h2>
+        <p>정적 페이지, REST API, SQLite 기반 mock 분석 결과 조회를 담당합니다.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div>
+        <h2>Private MRI Pipeline</h2>
+        <p>pydicom, nibabel, NumPy, marching cubes 기반으로 로컬 private volume을 처리합니다.</p>
+      </div>
+      <div class="card feature-card">
+        <div class="feature-icon"><img src="/assets/mri-icon.jpg" alt=""></div>
+        <h2>Three.js Viewer</h2>
+        <p>생성된 GLB 모델을 브라우저에서 회전, 확대, 축소하며 확인합니다.</p>
+      </div>
     </section>
   </main>
+
   <script src="/static/js/common.js"></script>
   <script>
     async function loadDashboard() {
       try {
         const rows = await apiGet('/api/studies');
         document.getElementById('studyCount').textContent = rows.length;
-        const latest = rows.filter(r => r.volume_cm3).at(-1);
+        const latest = rows.filter((row) => row.volume_cm3).at(-1);
         document.getElementById('latestVolume').textContent = latest ? latest.volume_cm3 : '-';
-      } catch { document.getElementById('studyCount').textContent = '0'; }
+      } catch {
+        document.getElementById('studyCount').textContent = '0';
+      }
     }
+
     document.getElementById('seedBtn').addEventListener('click', async () => {
       await apiPost('/api/studies/seed');
       await loadDashboard();
-      alert('샘플 T01~T12 데이터가 생성되었습니다.');
+      alert('Mock T01~T12 demo data가 생성되었습니다.');
     });
+
     loadDashboard();
   </script>
 </body>

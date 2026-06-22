@@ -1,6 +1,82 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>3D Viewer</title><link rel="icon" type="image/jpeg" href="/assets/mri-icon.jpg"><link rel="stylesheet" href="/static/css/style.css"></head><body>
-<header class="header"><nav class="nav"><a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a><div class="menu"><a href="/">대시보드</a><a href="/studies">MRI 목록</a><a href="/viewer">2D 뷰어</a><a href="/volume">부피</a><a href="/three-d" class="active">3D 뷰어</a></div></nav></header>
-<main class="container"><section class="grid two"><div class="card"><h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt="">3D 구조 모델 뷰어</h1><p>구조 분할 label map에서 생성한 GLB를 대뇌, 소뇌, 뇌간, 해마, 종양 단위로 켜고 끌 수 있습니다.</p><div class="form-grid"><div><label>환자 코드</label><input id="patientCode" value="P001"></div><div><label>시점</label><input id="studyLabel" value="T08"></div></div><label>단일 모델 URL</label><input id="modelUrl" value="/media/models/P001/T08/lesion_model.glb"><div class="structure-list" aria-label="3D structure toggles"><label class="toggle-row"><input type="checkbox" data-structure="cerebrum" checked><span class="swatch cerebrum"></span>대뇌</label><label class="toggle-row"><input type="checkbox" data-structure="cerebellum" checked><span class="swatch cerebellum"></span>소뇌</label><label class="toggle-row"><input type="checkbox" data-structure="brainstem" checked><span class="swatch brainstem"></span>뇌간</label><label class="toggle-row"><input type="checkbox" data-structure="hippocampus" checked><span class="swatch hippocampus"></span>해마</label><label class="toggle-row"><input type="checkbox" data-structure="tumor"><span class="swatch tumor"></span>종양</label></div><div class="actions"><button class="btn" id="loadStructuresBtn">구조 모델 로딩</button><button class="btn secondary" id="loadModelBtn">단일 모델 로딩</button><button class="btn secondary" id="sampleBtn">샘플 구조 보기</button></div><p class="small" id="viewerStatus">구조별 GLB는 /media/models/P001/T08/structures/ 경로에서 불러옵니다.</p><p class="notice">원본 MRI를 직접 3D로 띄우지 않고, 구조 분할 mask를 GLB로 변환한 결과만 표시합니다.</p></div><div id="threeCanvasWrap"></div></section></main>
-<script src="/static/js/common.js"></script>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
-<script type="module" src="/static/js/three_viewer.js"></script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D Viewer</title>
+  <link rel="icon" type="image/jpeg" href="/assets/mri-icon.jpg">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="header">
+    <nav class="nav">
+      <a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a>
+      <div class="menu">
+        <a href="/">대시보드</a>
+        <a href="/studies">MRI 목록</a>
+        <a href="/viewer">2D 뷰어</a>
+        <a href="/volume">부피</a>
+        <a href="/three-d" class="active">3D 뷰어</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="container">
+    <div class="mode-banner">
+      <span class="mode-chip private">Private Analysis Mode</span>
+      <div>
+        <b>실제 3D 분석은 private NIfTI/DICOM volume과 segmentation mask 입력을 기준으로 수행합니다.</b>
+        <p>Demo Mode에서는 샘플 도형만 표시합니다. 실제 GLB, mask, volume 결과 파일은 GitHub에 업로드하지 않습니다.</p>
+      </div>
+    </div>
+
+    <section class="grid two">
+      <div class="card">
+        <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt="">3D 구조 모델 뷰어</h1>
+        <p>Private Analysis Mode에서 생성한 구조별 GLB를 대뇌, 소뇌, 뇌간, 해마, 종양 단위로 켜고 끌 수 있습니다.</p>
+        <div class="mode-grid">
+          <div class="mode-card">
+            <span class="mode-chip demo">Demo Mode</span>
+            <p>샘플 구조 도형만 표시합니다. Kaggle 2D demo는 실제 3D 부피 계산에 사용하지 않습니다.</p>
+          </div>
+          <div class="mode-card private">
+            <span class="mode-chip private">Private Analysis Mode</span>
+            <p>로컬 private NIfTI/DICOM volume에서 mask와 GLB를 생성한 뒤 ignored media/output 경로에서 불러옵니다.</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div>
+            <label>환자 코드</label>
+            <input id="patientCode" value="P001">
+          </div>
+          <div>
+            <label>시점</label>
+            <input id="studyLabel" value="T08">
+          </div>
+        </div>
+        <label>Private GLB URL</label>
+        <input id="modelUrl" value="/media/models/P001/T08/lesion_model.glb">
+        <div class="structure-list" aria-label="3D structure toggles">
+          <label class="toggle-row"><input type="checkbox" data-structure="cerebrum" checked><span class="swatch cerebrum"></span>대뇌</label>
+          <label class="toggle-row"><input type="checkbox" data-structure="cerebellum" checked><span class="swatch cerebellum"></span>소뇌</label>
+          <label class="toggle-row"><input type="checkbox" data-structure="brainstem" checked><span class="swatch brainstem"></span>뇌간</label>
+          <label class="toggle-row"><input type="checkbox" data-structure="hippocampus" checked><span class="swatch hippocampus"></span>해마</label>
+          <label class="toggle-row"><input type="checkbox" data-structure="tumor"><span class="swatch tumor"></span>종양</label>
+        </div>
+        <div class="actions">
+          <button class="btn" id="loadStructuresBtn">Private 구조 모델 로딩</button>
+          <button class="btn secondary" id="loadModelBtn">단일 GLB 로딩</button>
+          <button class="btn secondary" id="sampleBtn">Demo 샘플 구조 보기</button>
+        </div>
+        <p class="small" id="viewerStatus">Demo Mode는 샘플 구조를 표시하고, Private Analysis Mode는 /media/models/P001/T08/structures/ 경로의 로컬 GLB를 불러옵니다.</p>
+        <p class="notice">원본 MRI를 직접 공개하지 않고, private mask에서 생성한 결과만 로컬에서 확인합니다.</p>
+      </div>
+      <div id="threeCanvasWrap"></div>
+    </section>
+  </main>
+
+  <script src="/static/js/common.js"></script>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+  <script type="module" src="/static/js/three_viewer.js"></script>
+</body>
+</html>
