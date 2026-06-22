@@ -209,6 +209,28 @@ th { color: #344054; background: #f8fafc; }
   color: white;
   overflow: hidden;
 }
+#threeCanvasWrap {
+  position: relative;
+}
+#threeCanvasWrap::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 58px;
+  height: 58px;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  background: #ffffff url("/assets/mri-icon.jpg") center / cover no-repeat;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  z-index: 2;
+}
+#threeCanvasWrap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
 .preview-box img, .viewer-box img { max-width: 100%; max-height: 420px; object-fit: contain; }
 .stat { font-size: 30px; font-weight: 800; color: var(--primary); }
 .small { font-size: 13px; color: var(--muted); }
@@ -280,4 +302,10 @@ select, input {
   .menu a { font-size: 13px; padding: 7px 8px; }
   .form-grid, .structure-list { grid-template-columns: 1fr; }
   .viewer-box, #threeCanvasWrap { min-height: 320px; }
+  #threeCanvasWrap::after {
+    width: 48px;
+    height: 48px;
+    top: 10px;
+    right: 10px;
+  }
 }
