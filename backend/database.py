@@ -1,5 +1,5 @@
 from pathlib import Path
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,6 +15,35 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
+
+STUDY_OPTIONAL_COLUMNS = {
+    "sequence_type": "VARCHAR(50)",
+    "modality": "VARCHAR(20)",
+    "voxel_spacing_x": "FLOAT",
+    "voxel_spacing_y": "FLOAT",
+    "voxel_spacing_z": "FLOAT",
+    "slice_count": "INTEGER",
+    "nifti_path": "VARCHAR(255)",
+    "mask_path": "VARCHAR(255)",
+    "registered_path": "VARCHAR(255)",
+    "preprocess_status": "VARCHAR(50)",
+    "registration_status": "VARCHAR(50)",
+    "segmentation_status": "VARCHAR(50)",
+    "is_sample_data": "BOOLEAN DEFAULT 1 NOT NULL",
+    "structure_models_json": "TEXT",
+    "structure_volumes_json": "TEXT",
+}
+
+def ensure_study_optional_columns():
+    inspector = inspect(engine)
+    if "studies" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("studies")}
+    with engine.begin() as conn:
+        for column_name, ddl_type in STUDY_OPTIONAL_COLUMNS.items():
+            if column_name not in existing:
+                conn.execute(text(f"ALTER TABLE studies ADD COLUMN {column_name} {ddl_type}"))
 
 def get_db():
     db = SessionLocal()
