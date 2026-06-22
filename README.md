@@ -1377,3 +1377,666 @@ git push origin main
 이 시스템은 의료 진단, 치료 효과 판단, 재발 여부 판단을 목적으로 하지 않습니다.
 실제 임상 판단은 반드시 의료진과 의료기관의 공식 판독 및 진료 절차를 따라야 합니다.
 
+---
+
+# 26. 요구사항정의서 기준
+
+본 프로젝트의 요구사항은 Brain MRI longitudinal tracking, Lumbar Spine MRI private review, CD/DICOM 자동 분석 파이프라인, 2D/3D 시각화, 비식별화 정책을 기준으로 정의합니다.
+
+## 26.1 기능 요구사항
+
+| 요구사항 ID | 요구사항명                         | 설명                                                                                 | 우선순위   |
+| ------- | ----------------------------- | ---------------------------------------------------------------------------------- | ------ |
+| REQ-001 | Demo Mode 제공                  | 공개 저장소에서 실제 MRI 없이 mock data 기반으로 시연 가능한 화면을 제공한다.                                 | High   |
+| REQ-002 | Private Analysis Mode 제공      | 로컬 private 폴더의 DICOM/NIfTI/mask 데이터를 기반으로 분석 준비 기능을 제공한다.                          | High   |
+| REQ-003 | Brain MRI Tracking            | Brain MRI는 BRAIN_T01~BRAIN_T14 또는 T01~T14 기준으로 longitudinal volume tracking을 제공한다. | High   |
+| REQ-004 | Lumbar Spine MRI 분리 관리        | Lumbar Spine MRI는 Brain MRI tracking과 섞지 않고 별도 body_region과 study_group으로 관리한다.    | High   |
+| REQ-005 | DICOM Folder Scan             | 사용자가 지정한 로컬 DICOM 폴더를 재귀적으로 스캔하고 series 목록을 생성한다.                                  | High   |
+| REQ-006 | DICOM Metadata Sanitization   | PatientID, 병원명, 촬영일, 병명, UID 등 민감 정보를 API/화면에 노출하지 않는다.                            | High   |
+| REQ-007 | T01~T14 Study Mapping         | Brain MRI series를 BRAIN_T01~BRAIN_T14 또는 T01~T14 형태로 매핑한다.                         | High   |
+| REQ-008 | Lumbar Study Mapping          | Lumbar Spine MRI series를 LUMBAR_T01, LUMBAR_T02 형태로 매핑한다.                          | Medium |
+| REQ-009 | Volume Calculation            | voxel count와 spacing 정보를 기반으로 volume_cm3를 계산한다.                                    | High   |
+| REQ-010 | NIfTI Mask Volume Calculation | private NIfTI mask 파일을 입력받아 voxel count와 volume_cm3를 계산한다.                         | High   |
+| REQ-011 | GLB Mesh Generation           | private mask 파일을 기반으로 3D GLB mesh를 생성한다.                                           | Medium |
+| REQ-012 | Structure Mesh Generation     | segmentation label map을 기반으로 구조별 GLB mesh를 생성한다.                                   | Medium |
+| REQ-013 | 2D Demo Viewer                | demo image 기반 2D slice viewer와 overlay toggle UI를 제공한다.                            | High   |
+| REQ-014 | 3D Viewer                     | GLB viewer 또는 placeholder viewer를 제공한다.                                            | High   |
+| REQ-015 | Volume Chart                  | Brain MRI T01~T14 volume trend chart를 제공한다.                                        | High   |
+| REQ-016 | Private Manifest 생성           | private analysis 결과를 sanitized manifest JSON으로 저장한다.                               | High   |
+| REQ-017 | Manifest 조회                   | 저장된 private manifest를 sanitized result 형태로 조회한다.                                   | Medium |
+| REQ-018 | 파일 부재 예외 처리                   | DICOM/NIfTI/mask 파일이 없을 때 서버가 죽지 않고 명확한 오류 메시지를 반환한다.                              | High   |
+| REQ-019 | GitHub 데이터 보호                 | 실제 MRI 원본, DICOM, NIfTI, GLB, mask, volume result를 GitHub에 포함하지 않는다.               | High   |
+| REQ-020 | 연구용 고지                        | 모든 화면에 의료 진단 대체 불가 및 연구용 프로토타입 고지를 표시한다.                                           | High   |
+
+---
+
+## 26.2 비기능 요구사항
+
+| 요구사항 ID | 요구사항명      | 설명                                                         | 우선순위   |
+| ------- | ---------- | ---------------------------------------------------------- | ------ |
+| NFR-001 | 개인정보 보호    | 실제 환자번호, 병원명, 촬영일, 병명, UID 등 민감 정보는 저장소와 화면에 노출하지 않는다.     | High   |
+| NFR-002 | 실행 안정성     | optional dependency가 없어도 FastAPI 서버는 실행 가능해야 한다.           | High   |
+| NFR-003 | 로컬 우선 처리   | Private Analysis Mode는 로컬 PC의 ignored folder 기준으로 동작한다.    | High   |
+| NFR-004 | 확장성        | Brain MRI 외 Lumbar Spine MRI 등 다른 body region 확장이 가능해야 한다. | Medium |
+| NFR-005 | 유지보수성      | router, service, frontend script를 역할별로 분리한다.               | Medium |
+| NFR-006 | 공개 저장소 안전성 | sample_data에는 mock/demo data만 포함한다.                        | High   |
+| NFR-007 | 오류 메시지 명확성 | 파일 없음, 변환 실패, optional package 미설치 상황에서 명확한 메시지를 제공한다.     | High   |
+| NFR-008 | 의료 안전 문구   | 진단, 치료 효과, 재발 여부를 확정하는 표현을 사용하지 않는다.                       | High   |
+
+---
+
+# 27. 화면설계서 기준
+
+본 프로젝트는 다음 화면을 기준으로 구성합니다.
+
+## 27.1 화면 목록
+
+| Screen ID          | 화면명              | URL         | 설명                                           |
+| ------------------ | ---------------- | ----------- | -------------------------------------------- |
+| SCR-MRI-HOME-01    | 대시보드             | `/`         | 프로젝트 소개, Demo Mode, Private Analysis Mode 안내 |
+| SCR-MRI-VIEWER-01  | 2D Demo Viewer   | `/viewer`   | demo MRI image 기반 2D viewer                  |
+| SCR-MRI-VOLUME-01  | Volume Tracking  | `/volume`   | Brain MRI T01~T14 volume chart/table         |
+| SCR-MRI-3D-01      | 3D Viewer        | `/three-d`  | GLB viewer 또는 placeholder viewer             |
+| SCR-MRI-PRIVATE-01 | Private Analysis | `/private`  | DICOM folder scan 및 private pipeline 실행      |
+| SCR-MRI-API-01     | API Status       | `/api/docs` | FastAPI Swagger 문서                           |
+
+---
+
+## 27.2 SCR-MRI-HOME-01 대시보드
+
+### 화면 목적
+
+프로젝트의 전체 기능과 운영 모드를 안내하는 메인 화면입니다.
+
+### 주요 구성요소
+
+| 영역         | 구성요소                  | 설명                                  |
+| ---------- | --------------------- | ----------------------------------- |
+| Header     | 프로젝트명                 | Brain & Lumbar MRI 3D Visualization |
+| Mode Card  | Demo Mode             | mock data 기반 시연 모드 설명               |
+| Mode Card  | Private Analysis Mode | 로컬 DICOM/NIfTI 기반 분석 모드 설명          |
+| Navigation | Viewer Button         | `/viewer`로 이동                       |
+| Navigation | Volume Button         | `/volume`로 이동                       |
+| Navigation | 3D Button             | `/three-d`로 이동                      |
+| Navigation | Private Button        | `/private`로 이동                      |
+| Notice     | 연구용 고지                | 의료 진단 대체 불가 문구 표시                   |
+
+### 화면 문구 기준
+
+```text
+본 프로젝트는 연구용/포트폴리오용 프로토타입입니다.
+분석 결과는 의료진의 진단, 치료 효과 판단, 재발 여부 판단을 대체하지 않습니다.
+```
+
+---
+
+## 27.3 SCR-MRI-VIEWER-01 2D Demo Viewer
+
+### 화면 목적
+
+실제 MRI 원본 없이 demo image 기반으로 2D viewer UI를 시연합니다.
+
+### 주요 구성요소
+
+| 영역          | 구성요소           | 설명                     |
+| ----------- | -------------- | ---------------------- |
+| Viewer Area | Demo MRI Image | 공개 가능한 demo image 표시   |
+| Control     | Slice Index    | slice index 선택 UI      |
+| Control     | Overlay Toggle | overlay on/off         |
+| Info        | Demo Notice    | 실제 DICOM/NIfTI가 아님을 표시 |
+| Info        | Privacy Notice | 실제 병명/환자정보 미표시         |
+
+### 기능
+
+* demo image 표시
+* slice index 변경
+* overlay toggle
+* 실제 DICOM/NIfTI 미사용 안내
+
+---
+
+## 27.4 SCR-MRI-VOLUME-01 Volume Tracking
+
+### 화면 목적
+
+Brain MRI T01~T14 기준 mock volume trend를 chart/table로 표시합니다.
+
+### 주요 구성요소
+
+| 영역     | 구성요소               | 설명                                                   |
+| ------ | ------------------ | ---------------------------------------------------- |
+| Filter | Body Region        | 기본값 BRAIN                                            |
+| Chart  | Volume Trend Chart | BRAIN_T01~BRAIN_T14 volume trend                     |
+| Table  | Tracking Table     | study_label, volume, hospital_alias, quality_flag 표시 |
+| Badge  | Transition Badge   | BRAIN_T05 transition point 표시                        |
+| Notice | Mock Notice        | 실제 환자 결과가 아님을 표시                                     |
+
+### 표시 필드
+
+```text
+patient_code
+body_region
+study_group
+study_label
+hospital_alias
+volume_cm3
+quality_flag
+comparison_role
+finding_group
+diagnosis_alias
+note
+```
+
+### 주의
+
+Lumbar Spine MRI는 Brain MRI volume tracking chart에 섞지 않습니다.
+
+---
+
+## 27.5 SCR-MRI-3D-01 3D Viewer
+
+### 화면 목적
+
+private GLB mesh 또는 placeholder mesh를 확인하는 화면입니다.
+
+### 주요 구성요소
+
+| 영역          | 구성요소            | 설명                        |
+| ----------- | --------------- | ------------------------- |
+| Viewer Area | 3D GLB Viewer   | GLB mesh 표시               |
+| Placeholder | Empty State     | GLB가 없을 때 안내 표시           |
+| Info        | Mesh Source     | Demo mesh/private mesh 구분 |
+| Notice      | Research Notice | 진단 목적 아님 표시               |
+
+### 기능
+
+* GLB viewer 표시
+* GLB가 없을 경우 placeholder 표시
+* private mesh는 ignored folder 기준으로만 사용
+
+---
+
+## 27.6 SCR-MRI-PRIVATE-01 Private Analysis
+
+### 화면 목적
+
+로컬 MRI CD/DICOM 폴더를 지정하여 비식별화된 scan result와 manifest를 생성합니다.
+
+### 주요 구성요소
+
+| 영역     | 구성요소            | 설명                             |
+| ------ | --------------- | ------------------------------ |
+| Input  | patient_code    | 기본값 P001                       |
+| Select | body_region     | BRAIN 또는 LUMBAR_SPINE          |
+| Input  | dicom_root_path | 로컬 DICOM 폴더 경로                 |
+| Button | Scan DICOM      | `/api/private/scan-dicom` 호출   |
+| Button | Run Pipeline    | `/api/private/run-pipeline` 호출 |
+| Result | Series List     | sanitized series 목록 표시         |
+| Result | Study Mapping   | BRAIN_T01 또는 LUMBAR_T01 매핑 결과  |
+| Result | Manifest Path   | private manifest 저장 경로         |
+| Notice | Privacy Notice  | raw metadata 미표시 안내            |
+
+### 입력 예시
+
+```text
+patient_code: P001
+body_region: BRAIN
+dicom_root_path: data/private/P001/brain/BRAIN_T01
+```
+
+```text
+patient_code: P001
+body_region: LUMBAR_SPINE
+dicom_root_path: data/private/P001/lumbar/LUMBAR_T01
+```
+
+---
+
+# 28. API 명세서 기준
+
+## 28.1 API 목록
+
+| Method | Endpoint                               | 설명                              |
+| ------ | -------------------------------------- | ------------------------------- |
+| GET    | `/api/studies`                         | mock study 목록 조회                |
+| POST   | `/api/studies/seed`                    | mock study seed 생성              |
+| GET    | `/api/tracking`                        | Brain MRI T01~T14 tracking 조회   |
+| POST   | `/api/analysis/volume`                 | voxel count 기반 volume 계산        |
+| POST   | `/api/analysis/volume/nifti`           | private NIfTI mask 기반 volume 계산 |
+| POST   | `/api/analysis/mesh`                   | private mask 기반 GLB 생성          |
+| POST   | `/api/analysis/structure-mesh`         | 구조별 segmentation mesh 생성        |
+| POST   | `/api/private/scan-dicom`              | private DICOM folder scan       |
+| POST   | `/api/private/run-pipeline`            | private analysis pipeline 실행    |
+| GET    | `/api/private/manifest/{patient_code}` | private manifest 조회             |
+
+---
+
+## 28.2 GET `/api/studies`
+
+### 설명
+
+Demo Mode용 mock study 목록을 조회합니다.
+
+### Response 예시
+
+```json
+[
+  {
+    "patient_code": "P001",
+    "body_region": "BRAIN",
+    "study_group": "BRAIN_TARGET_TRACKING",
+    "study_label": "BRAIN_T01",
+    "hospital_alias": "HOSP_A",
+    "finding_group": "TARGET_REGION_TRACKING",
+    "diagnosis_alias": "PRIVATE_DIAGNOSIS_REDACTED"
+  }
+]
+```
+
+---
+
+## 28.3 POST `/api/studies/seed`
+
+### 설명
+
+Demo Mode용 mock metadata와 tracking data를 생성합니다.
+
+### Response 예시
+
+```json
+{
+  "status": "ok",
+  "message": "Mock studies seeded successfully.",
+  "patient_code": "P001",
+  "created_count": 14
+}
+```
+
+---
+
+## 28.4 GET `/api/tracking`
+
+### 설명
+
+Brain MRI T01~T14 volume tracking 데이터를 반환합니다.
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_group": "BRAIN_TARGET_TRACKING",
+  "items": [
+    {
+      "study_label": "BRAIN_T01",
+      "hospital_alias": "HOSP_A",
+      "volume_cm3": 52.8,
+      "quality_flag": "baseline_reference",
+      "comparison_role": "reference_only",
+      "finding_group": "TARGET_REGION_TRACKING",
+      "diagnosis_alias": "PRIVATE_DIAGNOSIS_REDACTED",
+      "note": "mock demo value; cross-hospital comparison caution"
+    }
+  ],
+  "warning": "Mock data is not for diagnosis."
+}
+```
+
+---
+
+## 28.5 POST `/api/analysis/volume`
+
+### 설명
+
+voxel count와 spacing 값을 기반으로 volume_cm3를 계산합니다.
+
+### Request 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "voxel_count": 39400,
+  "spacing_mm": [1.0, 1.0, 1.0]
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "voxel_count": 39400,
+  "spacing_mm": [1.0, 1.0, 1.0],
+  "volume_cm3": 39.4,
+  "formula": "voxel_count * spacing_x_mm * spacing_y_mm * spacing_z_mm / 1000",
+  "warning": "Volume result is not for diagnosis."
+}
+```
+
+---
+
+## 28.6 POST `/api/analysis/volume/nifti`
+
+### 설명
+
+private NIfTI mask 파일을 읽어 volume_cm3를 계산합니다.
+
+### Request 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "mask_nifti_path": "data/private/P001/brain/BRAIN_T08/tumor_mask.nii.gz"
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "voxel_count": 39400,
+  "spacing_mm": [1.0, 1.0, 1.0],
+  "volume_cm3": 39.4,
+  "source": "private_nifti_mask",
+  "warning": "Private analysis result is not for diagnosis."
+}
+```
+
+### Error 예시
+
+```json
+{
+  "status": "error",
+  "message": "NIfTI mask file not found.",
+  "path": "data/private/P001/brain/BRAIN_T08/tumor_mask.nii.gz"
+}
+```
+
+---
+
+## 28.7 POST `/api/analysis/mesh`
+
+### 설명
+
+private `.npy` mask를 기반으로 GLB mesh를 생성합니다.
+
+### Request 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "mask_npy_path": "data/private/P001/brain/BRAIN_T08/tumor_mask.npy",
+  "spacing_mm": [1.0, 1.0, 1.0]
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "mesh_path": "media/models/P001/brain/BRAIN_T08.glb",
+  "status": "created",
+  "warning": "Generated mesh is not for diagnosis."
+}
+```
+
+---
+
+## 28.8 POST `/api/analysis/structure-mesh`
+
+### 설명
+
+segmentation label map을 기반으로 구조별 GLB mesh를 생성합니다.
+
+### Request 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "seg_nifti_path": "data/private/P001/brain/BRAIN_T08/synthseg_seg.nii.gz"
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "study_label": "BRAIN_T08",
+  "structures": [
+    {
+      "structure_name": "STRUCTURE_001",
+      "mesh_path": "media/models/P001/brain/BRAIN_T08_STRUCTURE_001.glb"
+    }
+  ],
+  "warning": "Structure mesh result is not for diagnosis."
+}
+```
+
+---
+
+## 28.9 POST `/api/private/scan-dicom`
+
+### 설명
+
+로컬 DICOM 폴더를 스캔하고 sanitized series 목록을 반환합니다.
+
+### Request 예시 - Brain
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "dicom_root_path": "data/private/P001/brain/BRAIN_T01"
+}
+```
+
+### Request 예시 - Lumbar
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "LUMBAR_SPINE",
+  "dicom_root_path": "data/private/P001/lumbar/LUMBAR_T01"
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "mode": "private_analysis",
+  "body_region": "BRAIN",
+  "study_group": "BRAIN_TARGET_TRACKING",
+  "series_count": 1,
+  "series": [
+    {
+      "series_key": "SERIES_001",
+      "study_label": "BRAIN_T01",
+      "modality": "MR",
+      "slice_count": 895,
+      "sanitized_description": "MRI_SERIES_REDACTED",
+      "finding_group": "TARGET_REGION_TRACKING",
+      "diagnosis_alias": "PRIVATE_DIAGNOSIS_REDACTED",
+      "status": "ready"
+    }
+  ],
+  "warning": "Private analysis result is not for diagnosis."
+}
+```
+
+---
+
+## 28.10 POST `/api/private/run-pipeline`
+
+### 설명
+
+DICOM scan, sanitization, study mapping, optional conversion, manifest 생성을 통합 실행합니다.
+
+### Request 예시
+
+```json
+{
+  "patient_code": "P001",
+  "body_region": "BRAIN",
+  "dicom_root_path": "data/private/P001/brain/BRAIN_T01",
+  "study_label_start": "BRAIN_T01",
+  "auto_convert_nifti": true,
+  "auto_generate_mesh": false
+}
+```
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "mode": "private_analysis",
+  "body_region": "BRAIN",
+  "study_group": "BRAIN_TARGET_TRACKING",
+  "total_series": 1,
+  "mapped_studies": ["BRAIN_T01"],
+  "output_manifest": "outputs/private/P001/brain/manifest.json",
+  "warning": "Private analysis result is not for diagnosis."
+}
+```
+
+---
+
+## 28.11 GET `/api/private/manifest/{patient_code}`
+
+### 설명
+
+private manifest를 조회합니다.
+응답에는 sanitized result만 포함합니다.
+
+### Response 예시
+
+```json
+{
+  "patient_code": "P001",
+  "manifests": [
+    {
+      "body_region": "BRAIN",
+      "manifest_path": "outputs/private/P001/brain/manifest.json",
+      "status": "available"
+    },
+    {
+      "body_region": "LUMBAR_SPINE",
+      "manifest_path": "outputs/private/P001/lumbar/manifest.json",
+      "status": "available"
+    }
+  ],
+  "warning": "Raw DICOM metadata is not exposed."
+}
+```
+
+---
+
+# 29. 데이터베이스 설계 기준
+
+본 프로젝트는 초기 MVP에서는 SQLite 또는 JSON/CSV 기반 mock data를 사용할 수 있습니다.
+추후 확장을 위해 다음 Study 모델 구조를 기준으로 합니다.
+
+## 29.1 Study Entity
+
+| 컬럼명                | 타입       | 설명                                            |
+| ------------------ | -------- | --------------------------------------------- |
+| id                 | Integer  | 내부 PK                                         |
+| patient_code       | String   | 비식별 환자 코드                                     |
+| body_region        | String   | BRAIN 또는 LUMBAR_SPINE                         |
+| study_group        | String   | BRAIN_TARGET_TRACKING 또는 LUMBAR_SPINE_REVIEW  |
+| study_label        | String   | BRAIN_T01 또는 LUMBAR_T01                       |
+| hospital_alias     | String   | HOSP_A, HOSP_B, HOSP_PRIVATE                  |
+| volume_cm3         | Float    | mock 또는 private calculated volume             |
+| quality_flag       | String   | baseline_reference, transition_caution 등      |
+| comparison_role    | String   | reference_only, transition_point 등            |
+| finding_group      | String   | TARGET_REGION_TRACKING 또는 SPINE_REGION_REVIEW |
+| diagnosis_alias    | String   | PRIVATE_DIAGNOSIS_REDACTED                    |
+| preview_image_path | String   | demo/private preview path                     |
+| mesh_path          | String   | private GLB mesh path                         |
+| note               | String   | mock/demo/private note                        |
+| created_at         | DateTime | 생성일                                           |
+| updated_at         | DateTime | 수정일                                           |
+
+---
+
+# 30. 라우터 및 서비스 매핑
+
+| 기능               | Router                                | Service               |
+| ---------------- | ------------------------------------- | --------------------- |
+| mock study 조회    | `backend/routers/studies.py`          | sample CSV 또는 DB      |
+| tracking 조회      | `backend/routers/tracking.py`         | sample CSV 또는 DB      |
+| volume 계산        | `backend/routers/analysis.py`         | `nifti_volume.py`     |
+| GLB 생성           | `backend/routers/analysis.py`         | `mesh_generator.py`   |
+| 구조별 mesh 생성      | `backend/routers/analysis.py`         | `structure_masks.py`  |
+| DICOM scan       | `backend/routers/private_analysis.py` | `dicom_scanner.py`    |
+| metadata 비식별화    | `private_analysis.py`                 | `deidentify.py`       |
+| DICOM to NIfTI   | `private_analysis.py`                 | `dicom_to_nifti.py`   |
+| private pipeline | `private_analysis.py`                 | `private_pipeline.py` |
+
+---
+
+# 31. 테스트 시나리오 기준
+
+| Test ID | 테스트명                  | 절차                          | 기대 결과                                    |
+| ------- | --------------------- | --------------------------- | ---------------------------------------- |
+| TST-001 | 서버 실행 테스트             | uvicorn 명령 실행               | 서버가 8000 포트에서 실행된다.                      |
+| TST-002 | 홈 화면 테스트              | `/` 접속                      | 대시보드가 표시된다.                              |
+| TST-003 | Viewer 화면 테스트         | `/viewer` 접속                | 2D demo viewer가 표시된다.                    |
+| TST-004 | Volume 화면 테스트         | `/volume` 접속                | Brain T01~T14 chart/table이 표시된다.         |
+| TST-005 | 3D 화면 테스트             | `/three-d` 접속               | 3D viewer 또는 placeholder가 표시된다.          |
+| TST-006 | Private 화면 테스트        | `/private` 접속               | DICOM path 입력 UI가 표시된다.                  |
+| TST-007 | Mock Seed API 테스트     | `POST /api/studies/seed`    | mock data 생성 성공 응답을 반환한다.                |
+| TST-008 | Tracking API 테스트      | `GET /api/tracking`         | Brain T01~T14 데이터를 반환한다.                 |
+| TST-009 | Volume API 테스트        | `POST /api/analysis/volume` | volume_cm3 계산 결과를 반환한다.                  |
+| TST-010 | 없는 NIfTI 파일 테스트       | 없는 mask path 입력             | 서버가 죽지 않고 error message를 반환한다.           |
+| TST-011 | 없는 DICOM 폴더 테스트       | 없는 dicom_root_path 입력       | 서버가 죽지 않고 error message를 반환한다.           |
+| TST-012 | Brain DICOM Scan 테스트  | body_region=BRAIN 입력        | BRAIN_TARGET_TRACKING 기준 response를 반환한다. |
+| TST-013 | Lumbar DICOM Scan 테스트 | body_region=LUMBAR_SPINE 입력 | LUMBAR_SPINE_REVIEW 기준 response를 반환한다.   |
+| TST-014 | 비식별화 테스트              | DICOM scan response 확인      | PatientID, 병원명, 촬영일, UID가 반환되지 않는다.      |
+| TST-015 | Gitignore 테스트         | git status 확인               | private MRI 파일이 추적되지 않는다.                |
+
+---
+
+# 32. Codex 추가 작업 지시
+
+Codex는 위 요구사항정의서, 화면설계서, API 명세서, DB 설계 기준, 테스트 시나리오를 기준으로 다음 작업을 수행합니다.
+
+1. README와 실제 코드 구조가 맞는지 확인합니다.
+2. 누락된 router, service, frontend 파일을 생성합니다.
+3. API response schema를 요구사항에 맞게 정리합니다.
+4. `/private` 화면에 body_region 선택 기능을 추가합니다.
+5. BRAIN과 LUMBAR_SPINE을 분리합니다.
+6. Brain MRI tracking은 T01~T14 또는 BRAIN_T01~BRAIN_T14 전체를 반환합니다.
+7. Lumbar Spine MRI는 tracking chart에 섞지 않습니다.
+8. DICOM raw metadata는 절대 response에 포함하지 않습니다.
+9. 파일이 없을 때 서버가 죽지 않게 예외 처리합니다.
+10. requirements.txt와 .gitignore를 검토합니다.
+11. 테스트 가능한 curl 명령어를 README 기준으로 맞춥니다.
+12. 작업 완료 후 변경 파일, 추가 API, 테스트 방법, Git 명령어를 보고합니다.
+
+권장 commit message:
+
+```bash
+git commit -m "Add requirements screens API specification for private MRI analysis"
+```
