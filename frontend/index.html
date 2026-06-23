@@ -30,12 +30,25 @@
       </div>
     </div>
 
+    <div class="clinical-region-tabs" aria-label="검토 영역 빠른 전환">
+      <button class="region-tab active" type="button" data-region-tab="brain" aria-pressed="true">
+        <span>Brain MRI</span>
+        <strong>종양 추적 / 부피 변화</strong>
+        <small>Tumor mask, longitudinal tracking</small>
+      </button>
+      <button class="region-tab" type="button" data-region-tab="lumbar" aria-pressed="false">
+        <span>Lumbar Spine MRI</span>
+        <strong>정상 참고 / 구조 확인</strong>
+        <small>Disc diagnosis label 미사용</small>
+      </button>
+    </div>
+
     <section class="clinical-workspace">
       <aside class="clinical-sidebar card">
         <div class="panel-header">
           <div>
             <span class="mode-chip private">Private Case</span>
-            <h2>리뷰 영역 선택</h2>
+            <h2>케이스 설정</h2>
           </div>
           <button class="btn secondary" id="seedBtn" type="button">Mock 생성</button>
         </div>
@@ -44,7 +57,7 @@
           <label>환자 코드
             <input id="patientCode" value="P001" autocomplete="off">
           </label>
-          <label>검토 영역
+          <label class="body-region-field">검토 영역
             <select id="bodyRegion">
               <option value="brain">Brain MRI / tumor tracking</option>
               <option value="lumbar">Lumbar Spine MRI / normal reference</option>
@@ -82,29 +95,30 @@
           </div>
         </div>
 
-        <div class="kaggle-panel clinical-kaggle">
-          <div class="panel-header">
-            <div>
-              <span class="mode-chip demo">Kaggle Direct</span>
-              <h2>공개 데이터 수집</h2>
-            </div>
+        <details class="kaggle-panel clinical-kaggle">
+          <summary>
+            <span class="mode-chip demo">Kaggle Direct</span>
+            <span>공개 데이터 수집</span>
+            <small>데모/파인튜닝 준비용</small>
+          </summary>
+          <div class="kaggle-content">
+            <label>Dataset slug
+              <input id="kaggleDataset" type="text" placeholder="owner/dataset-name">
+            </label>
+            <label>Target
+              <select id="kaggleTarget">
+                <option value="brain_mri/tumor">Brain MRI / Tumor</option>
+                <option value="lumbar_mri/normal">Lumbar MRI / Normal reference</option>
+              </select>
+            </label>
+            <label>Max files
+              <input id="kaggleMaxFiles" type="number" min="1" value="200">
+            </label>
+            <p class="small">공개 JPG/PNG는 데모/파인튜닝 준비용이며 3D 부피 계산에는 사용하지 않습니다.</p>
             <button class="btn secondary" id="kaggleImportBtn" type="button">Download</button>
+            <div id="kaggleImportResult" class="kaggle-result" hidden></div>
           </div>
-          <label>Dataset slug
-            <input id="kaggleDataset" type="text" placeholder="owner/dataset-name">
-          </label>
-          <label>Target
-            <select id="kaggleTarget">
-              <option value="brain_mri/tumor">Brain MRI / Tumor</option>
-              <option value="lumbar_mri/normal">Lumbar MRI / Normal reference</option>
-            </select>
-          </label>
-          <label>Max files
-            <input id="kaggleMaxFiles" type="number" min="1" value="200">
-          </label>
-          <p class="small">공개 JPG/PNG는 데모/파인튜닝 준비용이며 3D 부피 계산에는 사용하지 않습니다.</p>
-          <div id="kaggleImportResult" class="kaggle-result" hidden></div>
-        </div>
+        </details>
       </aside>
 
       <section class="clinical-main">
@@ -114,12 +128,34 @@
               <span class="mode-chip private" id="regionChip">Brain MRI Review</span>
               <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt=""><span id="workspaceTitle">Brain MRI 종양 추적 리뷰</span></h1>
               <p id="workspaceDescription">Brain MRI는 target region tracking, segmentation overlay, volume trend를 중심으로 검토합니다.</p>
+              <div class="case-summary-strip" aria-label="현재 검토 케이스">
+                <div><span>환자</span><strong id="summaryPatient">P001</strong></div>
+                <div><span>검사</span><strong id="summaryStudy">-</strong></div>
+                <div><span>시퀀스</span><strong id="summarySeries">-</strong></div>
+                <div><span>상태</span><strong id="summaryStatus">Draft</strong></div>
+              </div>
             </div>
             <div class="actions compact-actions">
               <button class="btn" id="previewBtn" type="button">원본</button>
               <button class="btn secondary" id="overlayBtn" type="button">마스크</button>
               <a class="btn secondary" href="/three-d">3D 열기</a>
             </div>
+          </div>
+
+          <div class="radiology-toolstrip" aria-label="영상 판독 도구">
+            <button class="tool-btn active" type="button" data-window-preset="brain">Brain WL/WW</button>
+            <button class="tool-btn" type="button" data-window-preset="soft">Soft tissue</button>
+            <button class="tool-btn" type="button" data-window-preset="lumbar">Spine WL/WW</button>
+            <button class="tool-btn" id="invertBtn" type="button">Invert</button>
+            <button class="tool-btn" id="measureBtn" type="button">Length</button>
+            <button class="tool-btn" id="resetViewBtn" type="button">Reset</button>
+          </div>
+
+          <div class="dicom-meta-grid" aria-label="DICOM 메타데이터">
+            <div><span>Modality</span><strong id="metaModality">MRI</strong></div>
+            <div><span>Spacing</span><strong id="metaSpacing">-</strong></div>
+            <div><span>Slice</span><strong id="metaSlice">-</strong></div>
+            <div><span>Source</span><strong id="metaSource">Private-ready</strong></div>
           </div>
 
           <div class="review-control-grid">
@@ -134,6 +170,14 @@
           <div class="clinical-image-stage" id="clinicalImageStage">
             <img id="clinicalPreview" src="/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png" data-fallback="/assets/mri-banner.png" alt="MRI preview slice">
             <img id="clinicalOverlay" src="/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png" data-fallback="/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png" alt="MRI segmentation overlay">
+            <div class="viewport-hud" aria-hidden="true">
+              <span id="viewportPreset">Brain WL/WW</span>
+              <span id="sliceHud">Slice -</span>
+            </div>
+            <div class="measurement-overlay" id="measurementOverlay" hidden aria-hidden="true">
+              <div class="measurement-line"></div>
+              <span class="measurement-label" id="measurementLabel">Length 28.4 mm</span>
+            </div>
           </div>
 
           <div class="segmentation-qc">
@@ -155,12 +199,30 @@
               <button class="btn secondary" id="copyReportBtn" type="button">복사</button>
             </div>
           </div>
-          <textarea id="clinicalReport" rows="8" spellcheck="false"></textarea>
+          <div class="structured-report-grid">
+            <label>Findings
+              <textarea id="reportFindings" rows="3" placeholder="관찰 소견을 입력합니다. 비워두면 선택된 검사 기준 초안이 생성됩니다."></textarea>
+            </label>
+            <label>Impression
+              <textarea id="reportImpression" rows="3" placeholder="판독 인상 또는 추적 판단을 입력합니다."></textarea>
+            </label>
+            <label>Recommendation
+              <input id="reportRecommendation" type="text" placeholder="추적 검사, 비교 판독, 임상 상관 등">
+            </label>
+            <label class="toggle-row critical-toggle"><input type="checkbox" id="criticalFlag"><span>중요 소견 알림 필요</span></label>
+          </div>
+          <textarea id="clinicalReport" rows="10" spellcheck="false"></textarea>
           <p class="notice">이 메모는 판독 보조용 초안입니다. Brain/Lumbar 모두 최종 판독문과 치료 결정은 담당 의사가 확인해야 합니다.</p>
         </div>
       </section>
 
       <aside class="clinical-right card">
+        <div class="comparison-panel">
+          <span class="mode-chip private">Prior Comparison</span>
+          <h2>이전 검사 비교</h2>
+          <p id="comparisonSummary">이전 검사를 불러오는 중입니다.</p>
+        </div>
+
         <span class="mode-chip private">Measurements</span>
         <h2>측정 요약</h2>
         <div class="result-grid clinical-metrics">
@@ -177,6 +239,16 @@
             <thead><tr><th>시점</th><th>부피</th><th>변화</th></tr></thead>
             <tbody id="clinicalTimelineRows"></tbody>
           </table>
+        </div>
+
+        <div class="radiology-readiness">
+          <h2>판독 준비 상태</h2>
+          <ul class="privacy-list">
+            <li>Pixel spacing / slice thickness 확인</li>
+            <li>동일 시퀀스 prior comparison 확인</li>
+            <li>Mask overlay와 원본 slice 동시 검토</li>
+            <li>중요 소견은 최종 판독 전 별도 확인</li>
+          </ul>
         </div>
 
         <div class="clinical-safety">
