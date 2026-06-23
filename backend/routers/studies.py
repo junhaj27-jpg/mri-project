@@ -75,6 +75,16 @@ def seed_studies(db: Session = Depends(get_db)):
         {"study_label": "T10", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.9},
         {"study_label": "T11", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.7},
         {"study_label": "T12", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.5},
+        {
+            "study_label": "LUMBAR_T01",
+            "event_type": "lumbar_reference_review",
+            "section": "LUMBAR_REFERENCE",
+            "hospital_alias": "HOSP_PRIVATE",
+            "volume_cm3": None,
+            "preview_url": "/sample_data/kaggle_2d_demo/lumbar_mri/normal/mock_lumbar_normal.png",
+            "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_lumbar_mri_normal_overlay.png",
+            "memo": "Lumbar Spine MRI reference review only; not for disc, stenosis, or nerve compression diagnosis.",
+        },
     ]
     for row in seed_rows:
         study = db.query(Study).filter(Study.study_label == row["study_label"]).first()

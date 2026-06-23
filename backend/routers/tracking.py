@@ -8,7 +8,7 @@ router = APIRouter()
 
 @router.get("")
 def get_tracking(db: Session = Depends(get_db)):
-    rows = db.query(Study).order_by(Study.study_label.asc()).all()
+    rows = db.query(Study).filter(~Study.study_label.like("LUMBAR_%")).order_by(Study.study_label.asc()).all()
     result = []
     previous = None
     for row in rows:

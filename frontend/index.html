@@ -25,8 +25,8 @@
     <div class="mode-banner clinical-banner">
       <span class="mode-chip private">Clinician Review</span>
       <div>
-        <b>의사가 원본 MRI, segmentation, 3D 모델, 부피 변화, 추적 기록을 한 흐름에서 검토하는 작업 공간입니다.</b>
-        <p>현재 모델 추론은 placeholder입니다. 실제 진료 적용 전에는 병원 보안 환경, 비식별화, 성능 검증, 전문의 최종 확인, 관련 인허가 절차가 필요합니다.</p>
+        <b>Brain MRI와 Lumbar Spine MRI를 분리해서 검토하는 MRI 리뷰 작업 공간입니다.</b>
+        <p>Brain은 종양/target region tracking 중심, Lumbar는 정상/참고용 spine region review 중심으로 다룹니다. 현재 모델 추론은 placeholder이며 최종 판독과 진단을 대체하지 않습니다.</p>
       </div>
     </div>
 
@@ -35,7 +35,7 @@
         <div class="panel-header">
           <div>
             <span class="mode-chip private">Private Case</span>
-            <h2>환자/시점 선택</h2>
+            <h2>리뷰 영역 선택</h2>
           </div>
           <button class="btn secondary" id="seedBtn" type="button">Mock 생성</button>
         </div>
@@ -44,15 +44,23 @@
           <label>환자 코드
             <input id="patientCode" value="P001" autocomplete="off">
           </label>
+          <label>검토 영역
+            <select id="bodyRegion">
+              <option value="brain">Brain MRI / tumor tracking</option>
+              <option value="lumbar">Lumbar Spine MRI / normal reference</option>
+            </select>
+          </label>
           <label>검사 시점
             <select id="studySelect"></select>
           </label>
           <label>영상 종류
             <select id="seriesType">
-              <option>T1 post contrast</option>
-              <option>T2 / FLAIR</option>
-              <option>DWI / ADC</option>
-              <option>Lumbar MRI</option>
+              <option data-region="brain">T1 post contrast</option>
+              <option data-region="brain">T2 / FLAIR</option>
+              <option data-region="brain">DWI / ADC</option>
+              <option data-region="lumbar">Lumbar sagittal T2</option>
+              <option data-region="lumbar">Lumbar axial T2</option>
+              <option data-region="lumbar">Lumbar T1</option>
             </select>
           </label>
           <label>리뷰 상태
@@ -67,7 +75,7 @@
         <div class="upload-panel clinical-upload">
           <label for="modeUpload">Private MRI 업로드 분류</label>
           <input id="modeUpload" type="file" accept=".jpg,.jpeg,.png,.nii,.nii.gz,.dcm,.dicom,.ima">
-          <p class="small">JPG/PNG는 공개 2D 데모, NIfTI/DICOM은 private 3D 분석 모드로 분류합니다.</p>
+          <p class="small">JPG/PNG는 공개 2D 데모, NIfTI/DICOM은 private 3D 분석 모드로 분류합니다. Lumbar 파일명은 lumbar/spine/back/허리 키워드로 구분합니다.</p>
           <div id="uploadResult" class="mode-result compact-result private-mode">
             <h2>업로드 대기</h2>
             <p class="small">실제 private 원본은 GitHub에 저장하지 않습니다.</p>
@@ -88,7 +96,7 @@
           <label>Target
             <select id="kaggleTarget">
               <option value="brain_mri/tumor">Brain MRI / Tumor</option>
-              <option value="lumbar_mri/normal">Lumbar MRI / Normal</option>
+              <option value="lumbar_mri/normal">Lumbar MRI / Normal reference</option>
             </select>
           </label>
           <label>Max files
@@ -103,8 +111,9 @@
         <div class="card image-review-card">
           <div class="review-toolbar">
             <div>
-              <span class="mode-chip private">Slice Review</span>
-              <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt="">MRI 리뷰 워크스페이스</h1>
+              <span class="mode-chip private" id="regionChip">Brain MRI Review</span>
+              <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt=""><span id="workspaceTitle">Brain MRI 종양 추적 리뷰</span></h1>
+              <p id="workspaceDescription">Brain MRI는 target region tracking, segmentation overlay, volume trend를 중심으로 검토합니다.</p>
             </div>
             <div class="actions compact-actions">
               <button class="btn" id="previewBtn" type="button">원본</button>
@@ -128,10 +137,10 @@
           </div>
 
           <div class="segmentation-qc">
-            <label class="toggle-row"><input type="checkbox" id="qcBoundary"> 병변 경계 확인</label>
-            <label class="toggle-row"><input type="checkbox" id="qcArtifacts"> artifact / motion 영향 확인</label>
-            <label class="toggle-row"><input type="checkbox" id="qcSeries"> 동일 sequence 비교 확인</label>
-            <label class="toggle-row"><input type="checkbox" id="qcClinician"> 전문의 최종 확인</label>
+            <label class="toggle-row"><input type="checkbox" id="qcBoundary"><span id="qcBoundaryText">병변 경계 확인</span></label>
+            <label class="toggle-row"><input type="checkbox" id="qcArtifacts"><span id="qcArtifactsText">artifact / motion 영향 확인</span></label>
+            <label class="toggle-row"><input type="checkbox" id="qcSeries"><span id="qcSeriesText">동일 sequence 비교 확인</span></label>
+            <label class="toggle-row"><input type="checkbox" id="qcClinician"><span id="qcClinicianText">전문의 최종 확인</span></label>
           </div>
         </div>
 
@@ -147,7 +156,7 @@
             </div>
           </div>
           <textarea id="clinicalReport" rows="8" spellcheck="false"></textarea>
-          <p class="notice">이 메모는 판독 보조용 초안입니다. 최종 판독문과 치료 결정은 담당 의사가 확인해야 합니다.</p>
+          <p class="notice">이 메모는 판독 보조용 초안입니다. Brain/Lumbar 모두 최종 판독문과 치료 결정은 담당 의사가 확인해야 합니다.</p>
         </div>
       </section>
 
@@ -155,13 +164,13 @@
         <span class="mode-chip private">Measurements</span>
         <h2>측정 요약</h2>
         <div class="result-grid clinical-metrics">
-          <div class="metric-card"><span>Study</span><strong id="metricStudy">-</strong><small id="metricEvent">-</small></div>
-          <div class="metric-card"><span>Volume</span><strong id="metricVolume">-</strong><small>cm3</small></div>
-          <div class="metric-card"><span>Change</span><strong id="metricChange">-</strong><small>이전 시점 대비</small></div>
+          <div class="metric-card"><span>Region</span><strong id="metricRegion">Brain MRI</strong><small id="metricStudy">-</small></div>
+          <div class="metric-card"><span>Purpose</span><strong id="metricPurpose">Tracking</strong><small id="metricEvent">-</small></div>
+          <div class="metric-card"><span>Volume</span><strong id="metricVolume">-</strong><small id="metricVolumeHint">cm3</small></div>
           <div class="metric-card"><span>Status</span><strong id="metricStatus">Draft</strong><small>clinician review</small></div>
         </div>
 
-        <h2>Longitudinal Tracking</h2>
+        <h2 id="timelineTitle">Brain Longitudinal Tracking</h2>
         <div class="chart clinical-chart" id="clinicalChart"></div>
         <div class="table-wrap clinical-table-wrap">
           <table>
@@ -171,12 +180,12 @@
         </div>
 
         <div class="clinical-safety">
-          <h2>데이터 경계</h2>
+          <h2>Brain / Lumbar 데이터 경계</h2>
           <ul class="privacy-list">
-            <li>실제 MRI 원본은 private 경로에만 저장</li>
-            <li>Kaggle JPG/PNG는 공개 2D 데모/학습 준비용</li>
-            <li>3D 부피 계산은 NIfTI/DICOM + mask 전용</li>
-            <li>모델 결과는 의사 검토 전 확정값 아님</li>
+            <li>Brain MRI: 종양/target region tracking과 volume trend 중심</li>
+            <li>Lumbar MRI: 정상/참고용 spine region review 중심</li>
+            <li>Lumbar 공개 데이터는 디스크/협착 진단 라벨로 쓰지 않음</li>
+            <li>3D 부피 계산은 private NIfTI/DICOM + mask 전용</li>
           </ul>
         </div>
       </aside>

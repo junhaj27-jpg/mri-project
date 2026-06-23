@@ -1,11 +1,41 @@
-const PUBLIC_PREVIEW_URL = '/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png';
-const PUBLIC_OVERLAY_URL = '/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png';
+const REGION_CONFIG = {
+  brain: {
+    label: 'Brain MRI',
+    chip: 'Brain MRI Review',
+    title: 'Brain MRI 종양 추적 리뷰',
+    description: 'Brain MRI는 target region tracking, segmentation overlay, volume trend를 중심으로 검토합니다.',
+    preview: '/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png',
+    overlay: '/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png',
+    purpose: 'Tumor tracking',
+    timelineTitle: 'Brain Longitudinal Tracking',
+    volumeHint: 'cm3',
+    defaultStudy: 'T08',
+    studyPrefix: 'T',
+    qa: ['병변 경계 확인', 'artifact / motion 영향 확인', '동일 sequence 비교 확인', '전문의 최종 확인'],
+    memo: 'Brain MRI private NIfTI/DICOM 기반 분석 결과는 원본 영상, segmentation mask, volume trend를 함께 검토해야 합니다.',
+  },
+  lumbar: {
+    label: 'Lumbar Spine MRI',
+    chip: 'Lumbar MRI Review',
+    title: 'Lumbar Spine MRI 정상/참고 리뷰',
+    description: 'Lumbar MRI는 디스크/협착 진단이 아니라 spine region, disc-level, 구조 확인 중심의 private review로 다룹니다.',
+    preview: '/sample_data/kaggle_2d_demo/lumbar_mri/normal/mock_lumbar_normal.png',
+    overlay: '/sample_data/kaggle_2d_demo/masks/mock_lumbar_mri_normal_overlay.png',
+    purpose: 'Spine region review',
+    timelineTitle: 'Lumbar Reference Review',
+    volumeHint: 'reference',
+    defaultStudy: 'LUMBAR_T01',
+    studyPrefix: 'LUMBAR_',
+    qa: ['척추 레벨 확인', 'sagittal/axial 방향 확인', 'artifact / motion 영향 확인', '전문의 최종 확인'],
+    memo: 'Lumbar MRI는 정상/참고용 spine region review로 관리합니다. 디스크, 협착, 신경 압박에 대한 확정 진단 표현은 사용하지 않습니다.',
+  },
+};
 
 const studySelect = document.getElementById('studySelect');
+const bodyRegionSelect = document.getElementById('bodyRegion');
 const previewImg = document.getElementById('clinicalPreview');
 const overlayImg = document.getElementById('clinicalOverlay');
 const opacitySlider = document.getElementById('opacitySlider');
-const sliceSlider = document.getElementById('sliceSlider');
 const reportEl = document.getElementById('clinicalReport');
 
 let studies = [];
@@ -22,8 +52,27 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function currentRegion() {
+  return bodyRegionSelect.value || 'brain';
+}
+
+function currentConfig() {
+  return REGION_CONFIG[currentRegion()];
+}
+
+function isLumbarStudy(study) {
+  const text = `${study.study_label || ''} ${study.event_type || ''} ${study.section || ''}`.toLowerCase();
+  return text.includes('lumbar') || text.includes('spine');
+}
+
+function regionStudies() {
+  const region = currentRegion();
+  return studies.filter((study) => region === 'lumbar' ? isLumbarStudy(study) : !isLumbarStudy(study));
+}
+
 function selectedStudy() {
-  return studies.find((row) => row.study_label === studySelect.value) || studies[0] || null;
+  const rows = regionStudies();
+  return rows.find((row) => row.study_label === studySelect.value) || rows[0] || null;
 }
 
 function signedValue(value, suffix = '') {
@@ -41,58 +90,95 @@ function reviewStatusLabel() {
 
 async function ensureStudies() {
   studies = await apiGet('/api/studies');
-  if (!studies.length) {
+  if (!studies.length || !studies.some(isLumbarStudy)) {
     studies = await apiPost('/api/studies/seed');
   }
   tracking = await apiGet('/api/tracking').catch(() => []);
 }
 
+function renderSeriesOptions() {
+  const region = currentRegion();
+  const seriesType = document.getElementById('seriesType');
+  Array.from(seriesType.options).forEach((option) => {
+    option.hidden = option.dataset.region && option.dataset.region !== region;
+  });
+  const firstVisible = Array.from(seriesType.options).find((option) => !option.hidden);
+  if (firstVisible) seriesType.value = firstVisible.value;
+}
+
 function renderStudySelect() {
-  studySelect.innerHTML = studies.map((study) => (
+  const config = currentConfig();
+  const rows = regionStudies();
+  studySelect.innerHTML = rows.map((study) => (
     `<option value="${escapeHtml(study.study_label)}">${escapeHtml(study.study_label)} - ${escapeHtml(study.event_type)}</option>`
   )).join('');
-  if (studies.find((study) => study.study_label === 'T08')) studySelect.value = 'T08';
+
+  if (rows.find((study) => study.study_label === config.defaultStudy)) {
+    studySelect.value = config.defaultStudy;
+  }
+}
+
+function renderRegionText() {
+  const config = currentConfig();
+  document.getElementById('regionChip').textContent = config.chip;
+  document.getElementById('workspaceTitle').textContent = config.title;
+  document.getElementById('workspaceDescription').textContent = config.description;
+  document.getElementById('metricRegion').textContent = config.label;
+  document.getElementById('metricPurpose').textContent = config.purpose;
+  document.getElementById('timelineTitle').textContent = config.timelineTitle;
+  document.getElementById('metricVolumeHint').textContent = config.volumeHint;
+  document.getElementById('qcBoundaryText').textContent = config.qa[0];
+  document.getElementById('qcArtifactsText').textContent = config.qa[1];
+  document.getElementById('qcSeriesText').textContent = config.qa[2];
+  document.getElementById('qcClinicianText').textContent = config.qa[3];
 }
 
 function renderImages() {
+  const config = currentConfig();
   const study = selectedStudy();
-  const previewUrl = study?.preview_url || PUBLIC_PREVIEW_URL;
-  const overlayUrl = study?.overlay_url || PUBLIC_OVERLAY_URL;
+  const previewUrl = study?.preview_url || config.preview;
+  const overlayUrl = study?.overlay_url || config.overlay;
 
   previewImg.src = previewUrl;
+  previewImg.dataset.fallback = config.preview;
   overlayImg.src = overlayUrl;
+  overlayImg.dataset.fallback = config.preview;
   overlayImg.style.opacity = imageMode === 'overlay' ? String(Number(opacitySlider.value) / 100) : '0';
   window.applyImageFallback?.(document.getElementById('clinicalImageStage'));
 }
 
 function renderMetrics() {
   const study = selectedStudy();
-  if (!study) return;
-  document.getElementById('metricStudy').textContent = study.study_label;
-  document.getElementById('metricEvent').textContent = study.event_type || '-';
-  document.getElementById('metricVolume').textContent = study.volume_cm3 ?? '-';
-  document.getElementById('metricChange').textContent = signedValue(study.change_cm3, ' cm3');
+  const config = currentConfig();
+  document.getElementById('metricStudy').textContent = study?.study_label || '-';
+  document.getElementById('metricEvent').textContent = study?.event_type || '-';
+  document.getElementById('metricVolume').textContent = study?.volume_cm3 ?? (currentRegion() === 'lumbar' ? 'N/A' : '-');
+  document.getElementById('metricPurpose').textContent = config.purpose;
   document.getElementById('metricStatus').textContent = reviewStatusLabel();
 }
 
 function renderTimeline() {
-  const rows = tracking.length ? tracking : studies;
+  const region = currentRegion();
+  const rows = region === 'lumbar'
+    ? regionStudies()
+    : (tracking.length ? tracking.filter((row) => !isLumbarStudy(row)) : regionStudies());
+
   const max = Math.max(...rows.map((row) => row.volume_cm3 || 0), 1);
   document.getElementById('clinicalChart').innerHTML = rows.map((row) => {
-    const width = ((row.volume_cm3 || 0) / max) * 100;
+    const width = row.volume_cm3 ? ((row.volume_cm3 || 0) / max) * 100 : 18;
     const isSelected = row.study_label === studySelect.value;
     return `
       <div class="bar-row ${isSelected ? 'selected-bar' : ''}">
         <div class="bar-label">${escapeHtml(row.study_label)}</div>
         <div class="bar" style="width:${width}%"></div>
-        <div class="small">${row.volume_cm3 || '-'} cm3</div>
+        <div class="small">${row.volume_cm3 ? `${row.volume_cm3} cm3` : 'reference review'}</div>
       </div>`;
   }).join('');
 
   document.getElementById('clinicalTimelineRows').innerHTML = rows.map((row) => `
     <tr class="${row.study_label === studySelect.value ? 'selected-row' : ''}">
       <td><b>${escapeHtml(row.study_label)}</b></td>
-      <td>${row.volume_cm3 ?? '-'}</td>
+      <td>${row.volume_cm3 ?? 'N/A'}</td>
       <td>${signedValue(row.change_cm3, ' cm3')}</td>
     </tr>
   `).join('');
@@ -100,35 +186,40 @@ function renderTimeline() {
 
 function renderReport() {
   const study = selectedStudy();
-  if (!study) return;
+  const config = currentConfig();
   const checks = [
-    ['병변 경계', document.getElementById('qcBoundary').checked],
-    ['artifact/motion 영향', document.getElementById('qcArtifacts').checked],
-    ['동일 sequence 비교', document.getElementById('qcSeries').checked],
-    ['전문의 최종 확인', document.getElementById('qcClinician').checked],
+    [config.qa[0], document.getElementById('qcBoundary').checked],
+    [config.qa[1], document.getElementById('qcArtifacts').checked],
+    [config.qa[2], document.getElementById('qcSeries').checked],
+    [config.qa[3], document.getElementById('qcClinician').checked],
   ].map(([label, checked]) => `${label}: ${checked ? '확인' : '미확인'}`).join('\n');
 
   reportEl.value = [
     `[MRI Review Note]`,
-    `Patient code: ${document.getElementById('patientCode').value || study.patient_code || 'P001'}`,
-    `Study: ${study.study_label}`,
+    `Patient code: ${document.getElementById('patientCode').value || study?.patient_code || 'P001'}`,
+    `Body region: ${config.label}`,
+    `Study: ${study?.study_label || '-'}`,
     `Series: ${document.getElementById('seriesType').value}`,
-    `Event: ${study.event_type || '-'}`,
-    `Volume: ${study.volume_cm3 ?? '-'} cm3`,
-    `Change: ${signedValue(study.change_cm3, ' cm3')} (${signedValue(study.change_rate_percent, '%')})`,
+    `Event: ${study?.event_type || '-'}`,
+    `Volume: ${study?.volume_cm3 ?? 'N/A'} ${currentRegion() === 'lumbar' ? '(reference review)' : 'cm3'}`,
+    `Change: ${signedValue(study?.change_cm3, ' cm3')} (${signedValue(study?.change_rate_percent, '%')})`,
     `Review status: ${reviewStatusLabel()}`,
     ``,
-    `[Segmentation QA]`,
+    `[Review Scope]`,
+    config.memo,
+    ``,
+    `[QA]`,
     checks,
     ``,
     `[Memo]`,
-    study.memo || 'Private NIfTI/DICOM 기반 분석 결과를 원본 영상과 함께 검토해야 합니다.',
+    study?.memo || config.memo,
     ``,
     `Note: 이 문서는 판독 보조 초안이며 최종 진단/치료 판단을 대체하지 않습니다.`,
   ].join('\n');
 }
 
 function renderAll() {
+  renderRegionText();
   renderImages();
   renderMetrics();
   renderTimeline();
@@ -159,6 +250,11 @@ function renderUploadRoute(payload) {
 async function handleUpload(file) {
   if (!file) return;
   const ext = extensionOf(file.name);
+  const lower = file.name.toLowerCase();
+  if (lower.includes('lumbar') || lower.includes('spine') || lower.includes('허리')) {
+    bodyRegionSelect.value = 'lumbar';
+    handleRegionChange();
+  }
   if (['.jpg', '.jpeg', '.png'].includes(ext)) {
     previewImg.src = URL.createObjectURL(file);
     imageMode = 'preview';
@@ -224,12 +320,18 @@ async function importKaggle() {
   }
 }
 
+function handleRegionChange() {
+  renderSeriesOptions();
+  renderStudySelect();
+  renderAll();
+}
+
 document.getElementById('seedBtn').addEventListener('click', async () => {
   studies = await apiPost('/api/studies/seed');
   tracking = await apiGet('/api/tracking').catch(() => []);
-  renderStudySelect();
-  renderAll();
+  handleRegionChange();
 });
+bodyRegionSelect.addEventListener('change', handleRegionChange);
 studySelect.addEventListener('change', renderAll);
 document.getElementById('previewBtn').addEventListener('click', () => {
   imageMode = 'preview';
@@ -240,9 +342,6 @@ document.getElementById('overlayBtn').addEventListener('click', () => {
   renderImages();
 });
 opacitySlider.addEventListener('input', renderImages);
-sliceSlider.addEventListener('input', () => {
-  document.getElementById('viewerStatus')?.remove();
-});
 document.getElementById('reviewStatus').addEventListener('change', renderAll);
 document.querySelectorAll('.segmentation-qc input').forEach((input) => input.addEventListener('change', renderReport));
 document.getElementById('generateReportBtn').addEventListener('click', renderReport);
@@ -254,6 +353,7 @@ document.getElementById('kaggleImportBtn').addEventListener('click', importKaggl
 
 ensureStudies()
   .then(() => {
+    renderSeriesOptions();
     renderStudySelect();
     renderAll();
   })

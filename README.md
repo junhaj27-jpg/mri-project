@@ -7,6 +7,28 @@
 본 프로젝트는 실제 의료 진단 자동화 서비스가 아닙니다.
 목표는 사용자가 로컬 PC에서 MRI CD 또는 DICOM 폴더를 지정하면, 해당 데이터를 비식별화하여 분석 준비를 하고, 2D/3D 시각화와 부피 추적 결과를 확인할 수 있는 연구용/포트폴리오용 시스템을 구현하는 것입니다.
 
+## Brain / Lumbar 리뷰 범위
+
+이 프로젝트는 Brain MRI만 다루는 구조가 아니라 Brain MRI와 Lumbar Spine MRI를 분리해서 관리합니다.
+
+### Brain MRI
+
+- 목적: 종양/target region tracking, segmentation overlay, volume trend review
+- 공개 데모 데이터: `sample_data/kaggle_2d_demo/brain_mri/tumor/`
+- private 분석 입력: `data/private/P001/brain/BRAIN_Txx/`
+- 3D 부피 계산: private NIfTI/DICOM volume과 segmentation mask가 있을 때만 수행
+
+### Lumbar Spine MRI
+
+- 목적: 정상/참고용 spine region review, disc-level 위치 확인, sagittal/axial series 검토
+- 공개 데모 데이터: `sample_data/kaggle_2d_demo/lumbar_mri/normal/`
+- private 분석 입력: `data/private/P001/lumbar/LUMBAR_Txx/`
+- 금지: 디스크, 협착, 신경 압박에 대한 확정 진단 표현
+- 허용: lumbar structure review, spine region review, reference review
+
+Lumbar MRI는 Brain MRI longitudinal volume chart에 섞지 않습니다. 별도 `LUMBAR_SPINE_REVIEW` 흐름으로 관리합니다.
+
+
 ## 현재 구현된 임상 리뷰 워크플로우
 
 `/` 또는 `/clinical` 화면은 실제 의료진 사용 동선에 맞춘 MRI 리뷰 워크스페이스입니다.
