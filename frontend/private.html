@@ -26,7 +26,7 @@
     <div class="mode-banner">
       <span class="mode-chip private">Private Analysis Mode</span>
       <div>
-        <b>로컬 ignored 폴더의 MRI CD/DICOM 경로만 스캔합니다.</b>
+        <b>로컬 ignored 폴더의 MRI CD/DICOM 경로만 분석 대상으로 사용합니다.</b>
         <p>응답에는 PatientID, 병원명, 촬영일, UID, 원문 description을 포함하지 않고 sanitized series와 manifest 경로만 표시합니다.</p>
       </div>
     </div>
@@ -56,7 +56,7 @@
           <button class="btn secondary" id="pipelineBtn" type="button">Run Pipeline</button>
           <button class="btn secondary" id="manifestBtn" type="button">Manifest 조회</button>
         </div>
-        <p class="notice">없는 폴더를 입력해도 서버는 죽지 않고 명확한 오류 메시지를 반환합니다. 실제 원본은 GitHub에 포함하지 않습니다.</p>
+        <p class="notice">없는 폴더를 입력해도 서버는 죽지 않고 명확한 오류 메시지를 반환합니다. 실제 MRI 원본은 GitHub에 포함하지 않습니다.</p>
       </div>
 
       <div class="card">
@@ -66,6 +66,24 @@
           <h2>대기 중</h2>
           <p class="small">로컬 private DICOM 경로를 입력하고 scan 또는 pipeline을 실행하세요.</p>
         </div>
+      </div>
+    </section>
+
+    <section class="card model-catalog-panel" aria-labelledby="modelCatalogTitle">
+      <div class="panel-header">
+        <div>
+          <span class="mode-chip private">Model Registry</span>
+          <h2 id="modelCatalogTitle">추천 모델 카탈로그</h2>
+          <p>Hugging Face 모델 ID와 표준 오픈소스 runner만 저장합니다. 모델 weight와 실제 MRI 데이터는 저장소에 포함하지 않습니다.</p>
+        </div>
+        <div class="actions compact-actions">
+          <button class="btn secondary" id="refreshModelsBtn" type="button">새로고침</button>
+          <a class="btn secondary" href="/api/private/model-catalog" target="_blank" rel="noreferrer">API JSON</a>
+        </div>
+      </div>
+      <div id="modelCatalogSummary" class="model-warning">모델 결과는 연구용 보조 지표이며 확정 진단으로 사용하지 않습니다.</div>
+      <div id="modelCatalog" class="model-catalog-list">
+        <div class="model-empty">모델 카탈로그를 불러오는 중입니다.</div>
       </div>
     </section>
   </main>

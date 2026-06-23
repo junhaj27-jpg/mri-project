@@ -1,0 +1,247 @@
+{
+  "version": "2026-06-23",
+  "last_verified": "2026-06-23",
+  "mode": "model_registry",
+  "download_policy": {
+    "model_files_committed": false,
+    "repository_policy": "Store model IDs, runner hints, and links only. Do not commit downloaded Hugging Face weights, private DICOM, private NIfTI, masks, meshes, or derived private outputs.",
+    "runtime_policy": "Download and run models only in a private GPU/runtime environment after license, input format, and validation checks.",
+    "clinical_policy": "Every model result is a research aid and must be reviewed by a qualified clinician. It is not an automatic diagnosis."
+  },
+  "stacks": [
+    {
+      "stack_id": "brain_private_core",
+      "mode": "PRIVATE_ANALYSIS",
+      "body_regions": [
+        "BRAIN"
+      ],
+      "title": "Brain MRI private 3D analysis stack",
+      "summary": "Primary private pipeline for brain extraction, tumor/target segmentation, volume measurement, and mesh generation.",
+      "recommended_for": [
+        "NIfTI/DICOM brain MRI",
+        "private 3D volume analysis",
+        "longitudinal target-region tracking"
+      ],
+      "models": [
+        {
+          "step": "brain_extraction",
+          "name": "HD-BET",
+          "source": "github",
+          "model_id": "MIC-DKFZ/HD-BET",
+          "url": "https://github.com/MIC-DKFZ/HD-BET",
+          "task": "brain extraction / skull stripping",
+          "input": "3D NIfTI brain MRI",
+          "output": "brain mask NIfTI",
+          "runner": "placeholder_cli",
+          "runner_hint": "hd-bet -i input.nii.gz -o output_dir -device cuda",
+          "status": "recommended_private_runner",
+          "note": "Use before tumor segmentation so later steps analyze the brain region only."
+        },
+        {
+          "step": "tumor_segmentation",
+          "name": "nnU-Net v2",
+          "source": "github",
+          "model_id": "MIC-DKFZ/nnUNet",
+          "url": "https://github.com/MIC-DKFZ/nnUNet",
+          "task": "3D medical image segmentation framework",
+          "input": "preprocessed 3D NIfTI volume",
+          "output": "segmentation mask NIfTI",
+          "runner": "placeholder_cli",
+          "runner_hint": "nnUNetv2_predict -i input_dir -o output_dir -d DatasetXXX -c 3d_fullres -f all",
+          "status": "recommended_training_and_inference_framework",
+          "note": "Best default for a validated private segmentation model; requires task-specific trained weights."
+        },
+        {
+          "step": "mesh_generation",
+          "name": "Marching Cubes + trimesh/scikit-image",
+          "source": "python",
+          "model_id": "not_ml_model",
+          "url": "https://scikit-image.org/docs/stable/api/skimage.measure.html#skimage.measure.marching_cubes",
+          "task": "mask to 3D mesh conversion",
+          "input": "segmentation mask volume",
+          "output": "GLB mesh",
+          "runner": "local_placeholder",
+          "runner_hint": "skimage.measure.marching_cubes(mask) -> trimesh export GLB",
+          "status": "recommended_geometry_step",
+          "note": "This is geometry processing, not diagnosis AI."
+        }
+      ]
+    },
+    {
+      "stack_id": "brain_huggingface_candidates",
+      "mode": "PRIVATE_ANALYSIS",
+      "body_regions": [
+        "BRAIN"
+      ],
+      "title": "Hugging Face brain MRI candidates",
+      "summary": "Candidate models to evaluate or fine-tune for brain MRI segmentation/masking. Keep them behind private validation.",
+      "recommended_for": [
+        "research comparison",
+        "fine-tuning candidate review",
+        "masking assistance"
+      ],
+      "models": [
+        {
+          "step": "tumor_segmentation_candidate",
+          "name": "MONAI BraTS MRI Segmentation",
+          "source": "huggingface",
+          "model_id": "MONAI/brats_mri_segmentation",
+          "url": "https://huggingface.co/MONAI/brats_mri_segmentation",
+          "task": "BraTS-style brain tumor segmentation",
+          "input": "brain MRI volume, expected format must be verified",
+          "output": "segmentation mask",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Load with MONAI/Hugging Face after checking card instructions.",
+          "status": "candidate_needs_local_validation",
+          "note": "Use as a candidate only; verify license, modalities, preprocessing, and performance on your private data."
+        },
+        {
+          "step": "interactive_masking_candidate",
+          "name": "MedSAM ViT-Base",
+          "source": "huggingface",
+          "model_id": "wanglab/medsam-vit-base",
+          "url": "https://huggingface.co/wanglab/medsam-vit-base",
+          "task": "promptable medical image mask generation",
+          "input": "2D slice with prompt/ROI",
+          "output": "2D mask",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use for clinician-guided ROI/mask assistance, not fully automatic diagnosis.",
+          "status": "optional_assisted_masking_candidate",
+          "note": "Good for UI-assisted masking experiments; not a replacement for validated 3D segmentation."
+        },
+        {
+          "step": "tumor_segmentation_candidate",
+          "name": "3D MRI Brain Tumor Segmentation",
+          "source": "huggingface",
+          "model_id": "khaledsayed1/3D_MRI_Brain_Tumor_Segmentation",
+          "url": "https://huggingface.co/khaledsayed1/3D_MRI_Brain_Tumor_Segmentation",
+          "task": "3D brain tumor segmentation candidate",
+          "input": "3D MRI, exact preprocessing must be verified",
+          "output": "segmentation mask",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Treat as a community candidate and validate before use.",
+          "status": "candidate_needs_validation",
+          "note": "Do not expose as clinical diagnosis without full validation."
+        }
+      ]
+    },
+    {
+      "stack_id": "lumbar_private_candidates",
+      "mode": "PRIVATE_ANALYSIS",
+      "body_regions": [
+        "LUMBAR_SPINE"
+      ],
+      "title": "Lumbar spine MRI review candidates",
+      "summary": "Lumbar pipeline candidates for structure review. The app must avoid disc/stenosis/nerve-compression diagnosis wording.",
+      "recommended_for": [
+        "lumbar structure review",
+        "disc-level reference workflow",
+        "private MRI review support"
+      ],
+      "models": [
+        {
+          "step": "lumbar_structure_segmentation",
+          "name": "TotalSegmentator MRI",
+          "source": "github",
+          "model_id": "wasserth/TotalSegmentator",
+          "url": "https://github.com/wasserth/TotalSegmentator",
+          "task": "multi-structure segmentation candidate",
+          "input": "3D medical image volume",
+          "output": "structure masks",
+          "runner": "placeholder_cli",
+          "runner_hint": "TotalSegmentator -i input.nii.gz -o output_dir --task total_mr",
+          "status": "candidate_for_structure_review",
+          "note": "Use for structure review experiments only after verifying MRI task coverage and labels."
+        },
+        {
+          "step": "lumbar_classification_candidate",
+          "name": "Lumbar Spine Degenerative Classification",
+          "source": "huggingface",
+          "model_id": "mrimperium/Lumbar-Spine-Degenerative-Classification",
+          "url": "https://huggingface.co/mrimperium/Lumbar-Spine-Degenerative-Classification",
+          "task": "lumbar MRI classification candidate",
+          "input": "lumbar MRI image, exact format must be verified",
+          "output": "classification score",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use only as a research/fine-tuning candidate; keep UI wording as review/reference.",
+          "status": "candidate_not_for_diagnosis",
+          "note": "Do not present outputs as disc diagnosis, stenosis diagnosis, or nerve compression diagnosis."
+        },
+        {
+          "step": "interactive_masking_candidate",
+          "name": "MedSAM ViT-Base",
+          "source": "huggingface",
+          "model_id": "wanglab/medsam-vit-base",
+          "url": "https://huggingface.co/wanglab/medsam-vit-base",
+          "task": "promptable medical image mask generation",
+          "input": "2D lumbar slice with prompt/ROI",
+          "output": "2D mask",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use for manual ROI assistance in private review screens.",
+          "status": "optional_assisted_masking_candidate",
+          "note": "Needs local validation and clinician review."
+        }
+      ]
+    },
+    {
+      "stack_id": "public_demo_finetuning_candidates",
+      "mode": "PUBLIC_DEMO",
+      "body_regions": [
+        "PUBLIC_DEMO",
+        "BRAIN",
+        "LUMBAR_SPINE"
+      ],
+      "title": "Public Kaggle/demo fine-tuning candidates",
+      "summary": "2D JPG/PNG public demo candidates. These are not used for private 3D volume measurement.",
+      "recommended_for": [
+        "Kaggle 2D demo",
+        "classification demo",
+        "public fine-tuning experiments"
+      ],
+      "models": [
+        {
+          "step": "classification_demo",
+          "name": "Brain Tumor Detection MRI",
+          "source": "huggingface",
+          "model_id": "hugginglearners/brain-tumor-detection-mri",
+          "url": "https://huggingface.co/hugginglearners/brain-tumor-detection-mri",
+          "task": "2D brain MRI tumor detection demo",
+          "input": "public JPG/PNG demo image",
+          "output": "classification score",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use only for public demo/fine-tuning experiments.",
+          "status": "public_demo_candidate",
+          "note": "Not for 3D volume calculation and not for diagnosis."
+        },
+        {
+          "step": "classification_demo",
+          "name": "Brain MRI Tumor Classification",
+          "source": "huggingface",
+          "model_id": "ShabGaming/Brain_MRI_Tumor_Classification",
+          "url": "https://huggingface.co/ShabGaming/Brain_MRI_Tumor_Classification",
+          "task": "2D brain MRI classification demo",
+          "input": "public JPG/PNG demo image",
+          "output": "classification score",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use only after checking model card and license.",
+          "status": "public_demo_candidate",
+          "note": "Not for private clinical diagnosis."
+        },
+        {
+          "step": "public_masking_demo",
+          "name": "UNet Brain Tumor Segmentation MRI",
+          "source": "huggingface",
+          "model_id": "FancyM/UNet-Brain-Tumor-Segmentation-MRI",
+          "url": "https://huggingface.co/FancyM/UNet-Brain-Tumor-Segmentation-MRI",
+          "task": "2D brain tumor mask demo/fine-tuning",
+          "input": "public 2D MRI slice",
+          "output": "2D mask",
+          "runner": "placeholder_huggingface",
+          "runner_hint": "Use for public mask overlay/fine-tuning experiments.",
+          "status": "public_demo_candidate",
+          "note": "Do not use Kaggle JPG/PNG masks for 3D volume measurement."
+        }
+      ]
+    }
+  ]
+}

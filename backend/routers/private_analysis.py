@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..services.deidentify import safe_patient_code, study_group_for_region
 from ..services.dicom_scanner import scan_dicom_folder
+from ..services.model_catalog import filter_model_catalog, load_model_catalog
 from ..services.private_pipeline import list_manifests, run_private_pipeline
 
 router = APIRouter()
@@ -89,6 +90,13 @@ def manifest(patient_code: str):
     return list_manifests(BASE_DIR, safe_patient_code(patient_code))
 
 
+@router.get("/model-catalog")
+def model_catalog(body_region: str | None = None, mode: str | None = None):
+    region = normalized_region(body_region) if body_region else None
+    catalog = load_model_catalog(BASE_DIR)
+    return filter_model_catalog(catalog, region, mode)
+
+
 @router.get("/policy")
 def private_policy():
     return {
@@ -97,5 +105,6 @@ def private_policy():
         "study_groups": {
             region: study_group_for_region(region) for region in sorted(ALLOWED_REGIONS)
         },
+        "model_catalog_endpoint": "/api/private/model-catalog",
         "warning": "Use only local ignored DICOM/NIfTI folders. Raw metadata is never returned.",
     }

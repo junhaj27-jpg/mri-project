@@ -73,6 +73,30 @@ curl -X POST http://127.0.0.1:8000/api/analysis/kaggle-direct-import ^
 
 Kaggle 원본/cache는 `sample_data/kaggle_2d_demo/_downloads/`에 남을 수 있으며 GitHub에는 올리지 않습니다.
 
+## 모델 카탈로그 및 Hugging Face 후보
+
+모델 파일은 GitHub에 포함하지 않고 `sample_data/model_catalog.json`에 모델 ID, 링크, runner placeholder만 저장합니다.
+
+- Private Brain MRI 기본 구조: HD-BET brain extraction, nnU-Net v2 기반 3D segmentation, mask 기반 volume/mesh generation
+- Hugging Face Brain 후보: `MONAI/brats_mri_segmentation`, `wanglab/medsam-vit-base`, `khaledsayed1/3D_MRI_Brain_Tumor_Segmentation`
+- Lumbar 후보: TotalSegmentator MRI 구조 검토, `mrimperium/Lumbar-Spine-Degenerative-Classification`, `wanglab/medsam-vit-base`
+- Public demo/fine-tuning 후보: `hugginglearners/brain-tumor-detection-mri`, `ShabGaming/Brain_MRI_Tumor_Classification`, `FancyM/UNet-Brain-Tumor-Segmentation-MRI`
+
+API:
+
+```text
+GET /api/private/model-catalog
+GET /api/private/model-catalog?body_region=BRAIN
+GET /api/private/model-catalog?body_region=LUMBAR_SPINE
+```
+
+주의:
+
+- Hugging Face weight는 로컬 private/GPU 환경에서 라이선스와 입력 포맷을 확인한 뒤 내려받습니다.
+- 공개 Kaggle JPG/PNG 모델은 demo/fine-tuning 후보이며 3D 부피 계산에는 사용하지 않습니다.
+- Lumbar 후보 모델 결과는 spine region review/reference 용도이며 디스크, 협착, 신경 압박 확정 진단으로 표현하지 않습니다.
+- 모든 모델 결과는 연구용 보조 지표이며 의료진 최종 확인을 대체하지 않습니다.
+
 ## 현재 추가된 모듈 구조
 
 ```text
