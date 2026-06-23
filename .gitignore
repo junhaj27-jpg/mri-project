@@ -1,23 +1,30 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
 
 # DB
 *.db
 db/
 
-# private MRI data
+# Private MRI data: keep directories, never commit contents.
 mri/
 mri_data/
 raw_private/
 encrypted/
 decrypted_test/
-data/private/
-data/dicom/
-data/nifti/
-outputs/private/
+data/private/*
+data/dicom/*
+data/nifti/*
+outputs/private/*
 
-# medical image files
+!data/private/.gitkeep
+!data/dicom/.gitkeep
+!data/nifti/.gitkeep
+!outputs/private/.gitkeep
+
+# Medical image files
 *.dcm
 *.dicom
 *.ima
@@ -30,7 +37,7 @@ outputs/private/
 *.npy
 *.npz
 
-# generated media
+# Generated private media/artifacts
 media/uploads/
 media/processed/
 media/slices/
@@ -38,17 +45,6 @@ media/overlays/
 media/masks/
 media/models/
 media/reports/
-outputs/**/*.csv
-outputs/**/*.json
-outputs/**/*.xlsx
-outputs/**/*.nii
-outputs/**/*.nii.gz
-outputs/**/*.npy
-outputs/**/*.npz
-outputs/**/*.glb
-outputs/**/*.gltf
-
-# generated 3D and mask artifacts
 *.glb
 *.gltf
 *mask*.png
@@ -57,9 +53,22 @@ outputs/**/*.gltf
 *volume_result*.csv
 *volume_result*.json
 
-# encrypted files
+# Public demo masks are allowed because they are synthetic/public 2D samples.
+!sample_data/kaggle_2d_demo/**/*.png
+!sample_data/kaggle_2d_demo/**/*.jpg
+!sample_data/kaggle_2d_demo/**/*.jpeg
+!sample_data/kaggle_2d_demo/**/*.csv
+!sample_data/kaggle_2d_demo/**/*.md
+!sample_data/kaggle_2d_demo/**/*.json
+
+# Encrypted files
 *.enc
 
-# OS
+# OS/editor
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+# Kaggle import cache/local config
+sample_data/kaggle_2d_demo/_downloads/
+sample_data/kaggle_2d_demo/kaggle_sources.json

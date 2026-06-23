@@ -12,35 +12,36 @@
     <nav class="nav">
       <a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a>
       <div class="menu">
-        <a href="/">대시보드</a>
-        <a href="/studies">MRI 목록</a>
+        <a href="/" class="">임상 리뷰</a>
+        <a href="/studies" class="">MRI 목록</a>
         <a href="/viewer" class="active">2D 뷰어</a>
-        <a href="/volume">부피</a>
-        <a href="/three-d">3D 뷰어</a>
+        <a href="/volume" class="">부피 추적</a>
+        <a href="/three-d" class="">3D 뷰어</a>
       </div>
     </nav>
   </header>
 
   <main class="container">
     <div class="mode-banner">
-      <span class="mode-chip demo">Demo Mode</span>
+      <span class="mode-chip demo">2D Review</span>
       <div>
-        <b>2D 뷰어는 공개 가능한 demo preview/overlay만 표시합니다.</b>
-        <p>Kaggle 2D demo는 UI 시연용이며 실제 3D volume 계산에 사용하지 않습니다.</p>
+        <b>2D 뷰어는 preview slice와 mask overlay를 빠르게 확인하는 보조 화면입니다.</b>
+        <p>실제 DICOM/NIfTI 원본은 private 경로에서만 보관하고, 공개 저장소에는 변환된 demo preview만 포함합니다.</p>
       </div>
     </div>
 
     <section class="grid two">
       <div class="card">
         <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt="">2D MRI Slice Viewer</h1>
-        <p>preview slice와 mask overlay 이미지를 확인합니다. 원본 DICOM/NIfTI는 private 폴더에서만 보관합니다.</p>
+        <p>선택한 시점의 preview slice와 segmentation overlay를 확인합니다. 임상 리뷰는 메인 워크스페이스에서 진행하세요.</p>
         <label>시점 선택</label>
         <select id="studySelect"></select>
         <div class="actions">
-          <button class="btn" id="previewBtn">Preview 보기</button>
-          <button class="btn secondary" id="overlayBtn">Overlay 보기</button>
+          <button class="btn" id="previewBtn">원본 Preview</button>
+          <button class="btn secondary" id="overlayBtn">Mask Overlay</button>
+          <a class="btn secondary" href="/">임상 리뷰</a>
         </div>
-        <p class="notice">실제 MRI 원본은 GitHub에 포함하지 않고, 웹에는 변환된 demo preview만 표시합니다.</p>
+        <p class="notice">Kaggle 2D demo 이미지는 UI 시연/학습 준비용이며 실제 3D volume 계산에는 사용하지 않습니다.</p>
       </div>
       <div class="viewer-box" id="imageBox">이미지를 선택하세요</div>
     </section>

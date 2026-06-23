@@ -1,4 +1,4 @@
-# mri-project
+﻿# mri-project
 
 # Brain & Lumbar MRI 3D Visualization and Private DICOM Analysis Web Service
 
@@ -6,6 +6,69 @@
 
 본 프로젝트는 실제 의료 진단 자동화 서비스가 아닙니다.
 목표는 사용자가 로컬 PC에서 MRI CD 또는 DICOM 폴더를 지정하면, 해당 데이터를 비식별화하여 분석 준비를 하고, 2D/3D 시각화와 부피 추적 결과를 확인할 수 있는 연구용/포트폴리오용 시스템을 구현하는 것입니다.
+
+## 현재 구현된 임상 리뷰 워크플로우
+
+`/` 또는 `/clinical` 화면은 실제 의료진 사용 동선에 맞춘 MRI 리뷰 워크스페이스입니다.
+
+- 환자 코드와 MRI 시점 선택
+- private NIfTI/DICOM 업로드 분류
+- slice preview와 segmentation overlay 확인
+- segmentation QA 체크리스트
+- 부피 변화와 longitudinal timeline 확인
+- 3D viewer 이동
+- 판독 보조용 structured note 생성
+
+현재 모델 추론은 placeholder이며, 실제 진료 적용 전에는 병원 보안 환경, 비식별화, 성능 검증, 전문의 최종 확인, 관련 인허가 절차가 필요합니다. 이 프로젝트는 진단 또는 치료 판단을 자동화하지 않습니다.
+
+## 공개 데모 데이터와 비공개 분석 데이터 분리
+
+공개 저장소에는 코드, 공개 가능한 mock/demo 이미지, mock longitudinal data만 포함합니다. 실제 MRI 원본과 분석 산출물은 GitHub에 포함하지 않습니다.
+
+- `sample_data/kaggle_2d_demo/brain_mri/tumor/`: 뇌 MRI 종양 공개 2D 데모 데이터
+- `sample_data/kaggle_2d_demo/lumbar_mri/normal/`: 허리 MRI 정상/참고용 공개 2D 데모 데이터
+- `data/private/`, `data/dicom/`, `data/nifti/`: 실제 private MRI 입력 위치
+- `outputs/private/`: 실제 private 분석 산출물 위치
+
+Kaggle JPG/PNG 데이터와 공개 2D mask/overlay는 2D preview, classification demo, public reference mask, fine-tuning 준비용입니다. 3D 부피 계산에는 사용하지 않습니다.
+
+## Kaggle 직접 다운로드 방식
+
+Kaggle 공개 MRI 데이터는 수동 업로드 대신 Kaggle API로 직접 내려받아 `sample_data/kaggle_2d_demo/`에 정리합니다.
+
+```bash
+python scripts/import_kaggle_demo.py --dataset owner/brain-mri-dataset --anatomy brain_mri --label tumor --max-files 200
+python scripts/import_kaggle_demo.py --dataset owner/lumbar-spine-mri-dataset --anatomy lumbar_mri --label normal --max-files 200
+```
+
+웹 API에서도 직접 import할 수 있습니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/analysis/kaggle-direct-import ^
+  -H "Content-Type: application/json" ^
+  -d "{\"dataset\":\"owner/brain-mri-dataset\",\"anatomy\":\"brain_mri\",\"label\":\"tumor\",\"max_files\":200}"
+```
+
+Kaggle 원본/cache는 `sample_data/kaggle_2d_demo/_downloads/`에 남을 수 있으며 GitHub에는 올리지 않습니다.
+
+## 현재 추가된 모듈 구조
+
+```text
+backend/
+  preprocessing/
+  segmentation/
+  volume_tracking/
+  mesh_generation/
+frontend/
+  clinical.html
+  static/js/clinical_workflow.js
+scripts/
+  import_kaggle_demo.py
+sample_data/
+  kaggle_2d_demo/
+  mock_longitudinal/
+```
+
 
 중요:
 

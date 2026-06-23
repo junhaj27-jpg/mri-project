@@ -12,27 +12,31 @@
     <nav class="nav">
       <a class="brand" href="/"><img class="brand-icon" src="/assets/mri-icon.jpg" alt="">mri-project</a>
       <div class="menu">
-        <a href="/">대시보드</a>
+        <a href="/" class="">임상 리뷰</a>
         <a href="/studies" class="active">MRI 목록</a>
-        <a href="/viewer">2D 뷰어</a>
-        <a href="/volume">부피</a>
-        <a href="/three-d">3D 뷰어</a>
+        <a href="/viewer" class="">2D 뷰어</a>
+        <a href="/volume" class="">부피 추적</a>
+        <a href="/three-d" class="">3D 뷰어</a>
       </div>
     </nav>
   </header>
 
   <main class="container">
     <div class="mode-banner">
-      <span class="mode-chip demo">Demo Mode</span>
+      <span class="mode-chip private">Private Worklist</span>
       <div>
-        <b>현재 목록은 공개 가능한 mock longitudinal data입니다.</b>
-        <p>실제 환자 MRI 시점 정보는 private local DB 또는 비공개 파일에서만 관리합니다.</p>
+        <b>실제 MRI 시점 정보는 private local DB 또는 비공개 파일에서만 관리합니다.</b>
+        <p>현재 목록은 실행 확인용 mock longitudinal data입니다. 공개 Kaggle 2D demo는 실제 3D 부피 계산 입력으로 사용하지 않습니다.</p>
       </div>
     </div>
 
     <div class="card">
       <h1 class="page-title"><img class="page-title-icon" src="/assets/mri-icon.jpg" alt="">MRI 시점 목록</h1>
-      <p>T01~T12 비식별 시점 라벨로 mock MRI tracking 데이터를 관리합니다.</p>
+      <p>환자 코드, 검사 시점, 병원 가명, 이벤트, 부피 변화, 메모를 한 번에 확인합니다.</p>
+      <div class="actions">
+        <a class="btn" href="/">임상 리뷰 열기</a>
+        <button class="btn secondary" id="seedStudiesBtn" type="button">Mock 데이터 생성</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -41,7 +45,7 @@
           <tbody id="studyRows"></tbody>
         </table>
       </div>
-      <p class="notice">Demo Mode의 수치는 실제 환자 결과가 아니며, Kaggle 2D demo도 실제 3D 부피 계산 입력으로 사용하지 않습니다.</p>
+      <p class="notice">표시값은 연구용 예시입니다. 실제 진료에서는 원본 영상, mask 품질, 촬영 protocol 차이를 함께 확인해야 합니다.</p>
     </div>
   </main>
 

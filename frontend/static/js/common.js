@@ -20,7 +20,21 @@ async function apiPost(path, body = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+async function apiUpload(path, file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API}${path}`, { method: 'POST', body: formData });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -43,5 +57,6 @@ function applyImageFallback(root = document) {
   });
 }
 
+window.apiUpload = apiUpload;
 window.applyImageFallback = applyImageFallback;
 document.addEventListener('DOMContentLoaded', () => applyImageFallback());

@@ -13,30 +13,75 @@ const STRUCTURES = {
   tumor: { label: '종양', color: 0xf43f5e },
 };
 
-let scene, camera, renderer, controls;
+let scene;
+let camera;
+let renderer;
+let controls;
 let currentObject = null;
 let structureGroup = null;
 let loadedStructures = {};
+let scrollRotationTarget = 0;
+let scrollTiltTarget = 0;
+let pageScrollProgress = 0;
 
 function setStatus(message) {
   if (statusEl) statusEl.textContent = message;
+}
+
+function activeModel() {
+  return structureGroup || currentObject;
+}
+
+function updatePageScrollProgress() {
+  const doc = document.documentElement;
+  const maxScroll = Math.max(doc.scrollHeight - window.innerHeight, 1);
+  pageScrollProgress = THREE.MathUtils.clamp(window.scrollY / maxScroll, 0, 1);
+}
+
+function handleCanvasWheel(event) {
+  event.preventDefault();
+  scrollRotationTarget += event.deltaY * 0.006;
+  scrollTiltTarget = THREE.MathUtils.clamp(scrollTiltTarget + event.deltaX * 0.003, -0.5, 0.5);
+  setStatus('스크롤로 3D 모델을 회전하고 있습니다. 마우스 드래그로도 방향을 조정할 수 있습니다.');
+}
+
+function resetScrollMotion() {
+  scrollRotationTarget = 0;
+  scrollTiltTarget = 0;
+  updatePageScrollProgress();
+}
+
+function applyScrollMotion() {
+  const object = activeModel();
+  if (!object) return;
+
+  const targetY = scrollRotationTarget + pageScrollProgress * Math.PI * 2.0;
+  const targetX = scrollTiltTarget + Math.sin(pageScrollProgress * Math.PI) * 0.18;
+  const targetZ = Math.sin(pageScrollProgress * Math.PI * 2.0) * 0.04;
+
+  object.rotation.y += (targetY - object.rotation.y) * 0.08;
+  object.rotation.x += (targetX - object.rotation.x) * 0.08;
+  object.rotation.z += (targetZ - object.rotation.z) * 0.08;
 }
 
 function initScene() {
   wrap.innerHTML = '';
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0f172a);
+
   camera = new THREE.PerspectiveCamera(60, wrap.clientWidth / wrap.clientHeight, 0.1, 1000);
   camera.position.set(2.5, 2.5, 3.2);
+
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.domElement.id = 'viewerCanvas';
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(wrap.clientWidth, wrap.clientHeight || 420);
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight || 560);
   wrap.appendChild(renderer.domElement);
 
   const light1 = new THREE.DirectionalLight(0xffffff, 1.1);
   light1.position.set(3, 4, 5);
   scene.add(light1);
+
   const light2 = new THREE.DirectionalLight(0xffffff, 0.45);
   light2.position.set(-3, 2, -4);
   scene.add(light2);
@@ -44,11 +89,18 @@ function initScene() {
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.enablePan = false;
+  controls.enableZoom = false;
+
+  renderer.domElement.addEventListener('wheel', handleCanvasWheel, { passive: false });
+  window.addEventListener('scroll', updatePageScrollProgress, { passive: true });
+  updatePageScrollProgress();
   animate();
 }
 
 function animate() {
   requestAnimationFrame(animate);
+  applyScrollMotion();
   controls?.update();
   renderer?.render(scene, camera);
 }
@@ -72,6 +124,7 @@ function clearSceneModels() {
   currentObject = null;
   structureGroup = null;
   loadedStructures = {};
+  resetScrollMotion();
 }
 
 function fitCameraToObject(object) {
@@ -134,7 +187,7 @@ function showSample() {
   scene.add(structureGroup);
   syncStructureVisibility();
   fitCameraToObject(structureGroup);
-  setStatus('샘플 구조를 표시했습니다. 체크박스로 구조별 표시를 바꿀 수 있습니다.');
+  setStatus('샘플 구조를 표시했습니다. 스크롤하면 3D 모델이 회전합니다.');
 }
 
 function loadGLBModel(url) {
@@ -206,7 +259,7 @@ async function loadStructures() {
   fitCameraToObject(structureGroup);
   const loadedLabels = Object.keys(loadedStructures).map((name) => STRUCTURES[name].label).join(', ');
   const failedText = failed.length ? ` / 누락: ${failed.join(', ')}` : '';
-  setStatus(`로딩 완료: ${loadedLabels}${failedText}`);
+  setStatus(`로딩 완료: ${loadedLabels}${failedText}. 스크롤로 모델을 회전할 수 있습니다.`);
 }
 
 async function loadSingleModel(url) {
@@ -217,7 +270,7 @@ async function loadSingleModel(url) {
     tintModel(currentObject, STRUCTURES.tumor.color, 0.86);
     scene.add(currentObject);
     fitCameraToObject(currentObject);
-    setStatus('단일 GLB 모델을 표시했습니다.');
+    setStatus('단일 GLB 모델을 표시했습니다. 스크롤로 모델을 회전할 수 있습니다.');
   } catch {
     showSample();
     setStatus('GLB 파일을 찾지 못해 샘플 구조로 대체했습니다.');
@@ -236,7 +289,7 @@ window.addEventListener('resize', () => {
   if (!renderer || !camera) return;
   camera.aspect = wrap.clientWidth / wrap.clientHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(wrap.clientWidth, wrap.clientHeight || 420);
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight || 560);
 });
 
 initScene();

@@ -1,0 +1,20 @@
+{
+  "patient_id": "mock-private-001",
+  "visits": [
+    {
+      "visit": "baseline",
+      "date": "2026-01-15",
+      "volume_cc": 18.4
+    },
+    {
+      "visit": "followup_1",
+      "date": "2026-03-15",
+      "volume_cc": 17.2
+    },
+    {
+      "visit": "followup_2",
+      "date": "2026-06-15",
+      "volume_cc": 15.9
+    }
+  ]
+}

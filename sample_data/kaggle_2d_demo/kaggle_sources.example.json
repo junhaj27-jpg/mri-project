@@ -1,0 +1,20 @@
+{
+  "sources": [
+    {
+      "name": "brain_tumor_public",
+      "dataset": "owner/brain-mri-tumor-dataset",
+      "anatomy": "brain_mri",
+      "label": "tumor",
+      "max_files": 200,
+      "generate_reference_masks": true
+    },
+    {
+      "name": "lumbar_reference_public",
+      "dataset": "owner/lumbar-spine-mri-dataset",
+      "anatomy": "lumbar_mri",
+      "label": "normal",
+      "max_files": 200,
+      "generate_reference_masks": true
+    }
+  ]
+}

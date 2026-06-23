@@ -12,8 +12,13 @@ async function loadStudies() {
         <td>${row.memo || '-'}</td>
       </tr>`).join('');
   } catch {
-    tbody.innerHTML = '<tr><td colspan="6">데이터가 없습니다. 대시보드에서 Mock 데이터를 생성하세요.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6">데이터가 없습니다. Mock 데이터를 먼저 생성하세요.</td></tr>';
   }
 }
+
+document.getElementById('seedStudiesBtn')?.addEventListener('click', async () => {
+  await apiPost('/api/studies/seed');
+  await loadStudies();
+});
 
 loadStudies();
