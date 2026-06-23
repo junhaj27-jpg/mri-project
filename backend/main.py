@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import Base, engine, ensure_study_optional_columns
-from .routers import analysis, studies, tracking
+from .routers import analysis, private_analysis, studies, tracking
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -42,6 +42,7 @@ app.mount("/sample_data", StaticFiles(directory=SAMPLE_DATA_DIR), name="sample_d
 app.include_router(studies.router, prefix="/api/studies", tags=["studies"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(tracking.router, prefix="/api/tracking", tags=["tracking"])
+app.include_router(private_analysis.router, prefix="/api/private", tags=["private-analysis"])
 
 
 @app.get("/")
@@ -72,6 +73,11 @@ def volume_page():
 @app.get("/three-d")
 def three_d_page():
     return FileResponse(FRONTEND_DIR / "three_d.html")
+
+
+@app.get("/private")
+def private_page():
+    return FileResponse(FRONTEND_DIR / "private.html")
 
 
 @app.get("/health")

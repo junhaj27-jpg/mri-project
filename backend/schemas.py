@@ -5,10 +5,16 @@ NOTICE = "본 결과는 의료진 진단을 대체하지 않는 연구용 분석
 
 class StudyBase(BaseModel):
     patient_code: str = "P001"
+    body_region: str = "BRAIN"
+    study_group: str = "BRAIN_TARGET_TRACKING"
     study_label: str
     event_type: str
     section: Optional[str] = None
     hospital_alias: Optional[str] = None
+    quality_flag: Optional[str] = None
+    comparison_role: Optional[str] = None
+    finding_group: Optional[str] = None
+    diagnosis_alias: Optional[str] = "PRIVATE_DIAGNOSIS_REDACTED"
     memo: Optional[str] = None
     sequence_type: Optional[str] = None
     modality: Optional[str] = "MRI"

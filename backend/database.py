@@ -17,6 +17,12 @@ class Base(DeclarativeBase):
     pass
 
 STUDY_OPTIONAL_COLUMNS = {
+    "body_region": "VARCHAR(40) DEFAULT 'BRAIN' NOT NULL",
+    "study_group": "VARCHAR(80) DEFAULT 'BRAIN_TARGET_TRACKING' NOT NULL",
+    "quality_flag": "VARCHAR(80)",
+    "comparison_role": "VARCHAR(80)",
+    "finding_group": "VARCHAR(80)",
+    "diagnosis_alias": "VARCHAR(80) DEFAULT 'PRIVATE_DIAGNOSIS_REDACTED'",
     "sequence_type": "VARCHAR(50)",
     "modality": "VARCHAR(20)",
     "voxel_spacing_x": "FLOAT",

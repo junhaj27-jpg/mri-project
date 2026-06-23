@@ -7,6 +7,86 @@ from ..schemas import StudyCreate, StudyOut
 
 router = APIRouter()
 
+BRAIN_VALUES = [
+    52.8, 50.1, 48.7, 45.3, 44.9, 42.0, 39.8, 36.5, 34.1, 31.6, 29.4, 27.9, 26.2, 24.8
+]
+
+
+def brain_seed_row(index: int, previous: float | None) -> dict:
+    label = f"T{index:02d}"
+    volume = BRAIN_VALUES[index - 1]
+    if index <= 4:
+        event_type = "initial_reference"
+        section = "BRAIN_T01~BRAIN_T04"
+        hospital_alias = "HOSP_A"
+        quality_flag = "baseline_reference"
+        comparison_role = "reference_only"
+        note = "mock demo value; cross-hospital comparison caution"
+    elif index == 5:
+        event_type = "hospital_transition"
+        section = "BRAIN_T04~BRAIN_T05"
+        hospital_alias = "HOSP_B"
+        quality_flag = "transition_caution"
+        comparison_role = "transition_point"
+        note = "mock demo value; hospital or scanner transition point"
+    else:
+        event_type = "long_term_follow_up"
+        section = "BRAIN_T06~BRAIN_T14"
+        hospital_alias = "HOSP_B"
+        quality_flag = "longitudinal_tracking"
+        comparison_role = "tracking_target"
+        note = "mock demo value; longitudinal volume tracking reference"
+
+    change_cm3 = None if previous is None else round(volume - previous, 2)
+    change_rate = None if previous is None else round((change_cm3 / previous) * 100, 2)
+    return {
+        "patient_code": "P001",
+        "body_region": "BRAIN",
+        "study_group": "BRAIN_TARGET_TRACKING",
+        "study_label": label,
+        "event_type": event_type,
+        "section": section,
+        "hospital_alias": hospital_alias,
+        "quality_flag": quality_flag,
+        "comparison_role": comparison_role,
+        "finding_group": "TARGET_REGION_TRACKING",
+        "diagnosis_alias": "PRIVATE_DIAGNOSIS_REDACTED",
+        "volume_cm3": volume,
+        "change_cm3": change_cm3,
+        "change_rate_percent": change_rate,
+        "preview_url": "/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png",
+        "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png",
+        "memo": note,
+    }
+
+
+def seed_rows() -> list[dict]:
+    rows = []
+    previous = None
+    for index in range(1, 15):
+        row = brain_seed_row(index, previous)
+        rows.append(row)
+        previous = row["volume_cm3"]
+
+    rows.append({
+        "patient_code": "P001",
+        "body_region": "LUMBAR_SPINE",
+        "study_group": "LUMBAR_SPINE_REVIEW",
+        "study_label": "LUMBAR_T01",
+        "event_type": "lumbar_reference_review",
+        "section": "LUMBAR_REFERENCE",
+        "hospital_alias": "HOSP_PRIVATE",
+        "quality_flag": "private_reference",
+        "comparison_role": "reference_review",
+        "finding_group": "SPINE_REGION_REVIEW",
+        "diagnosis_alias": "PRIVATE_DIAGNOSIS_REDACTED",
+        "volume_cm3": None,
+        "preview_url": "/sample_data/kaggle_2d_demo/lumbar_mri/normal/mock_lumbar_normal.png",
+        "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_lumbar_mri_normal_overlay.png",
+        "memo": "mock lumbar private review placeholder; not for diagnosis",
+    })
+    return rows
+
 
 @router.get("", response_model=list[StudyOut])
 def list_studies(db: Session = Depends(get_db)):
@@ -35,66 +115,14 @@ def create_study(payload: StudyCreate, db: Session = Depends(get_db)):
 
 @router.post("/seed", response_model=list[StudyOut])
 def seed_studies(db: Session = Depends(get_db)):
-    seed_rows = [
-        {
-            "study_label": "T01",
-            "event_type": "surgery_follow_up",
-            "section": "T01~T04",
-            "hospital_alias": "HOSP_A",
-            "volume_cm3": 52.8,
-            "preview_url": "/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png",
-            "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png",
-            "memo": "Demo Mode: Kaggle-style 2D preview and mock longitudinal record.",
-        },
-        {"study_label": "T02", "event_type": "surgery_follow_up", "section": "T01~T04", "hospital_alias": "HOSP_A", "volume_cm3": 50.1},
-        {"study_label": "T03", "event_type": "surgery_follow_up", "section": "T01~T04", "hospital_alias": "HOSP_A", "volume_cm3": 48.7},
-        {"study_label": "T04", "event_type": "surgery_follow_up", "section": "T01~T04", "hospital_alias": "HOSP_A", "volume_cm3": 45.3},
-        {
-            "study_label": "T05",
-            "event_type": "hospital_transition",
-            "section": "T04~T05",
-            "hospital_alias": "HOSP_B",
-            "volume_cm3": 44.9,
-            "memo": "Mock transition interval; do not use as treatment-effect evidence.",
-        },
-        {"study_label": "T06", "event_type": "chemo_period_estimated", "section": "T05~T07", "hospital_alias": "HOSP_B", "volume_cm3": 42.0},
-        {"study_label": "T07", "event_type": "chemo_period_estimated", "section": "T05~T07", "hospital_alias": "HOSP_B", "volume_cm3": 40.8},
-        {
-            "study_label": "T08",
-            "event_type": "post_gamma_knife_follow_up",
-            "section": "T08 이후",
-            "hospital_alias": "HOSP_B",
-            "volume_cm3": 39.4,
-            "change_cm3": -2.6,
-            "change_rate_percent": -6.19,
-            "preview_url": "/sample_data/kaggle_2d_demo/brain_mri/tumor/mock_brain_tumor.png",
-            "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_brain_mri_tumor_overlay.png",
-            "memo": "Demo 2D preview only; real 3D volume analysis uses private NIfTI/DICOM input.",
-        },
-        {"study_label": "T09", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 39.1},
-        {"study_label": "T10", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.9},
-        {"study_label": "T11", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.7},
-        {"study_label": "T12", "event_type": "stable_follow_up", "section": "T09~T12", "hospital_alias": "HOSP_B", "volume_cm3": 38.5},
-        {
-            "study_label": "LUMBAR_T01",
-            "event_type": "lumbar_reference_review",
-            "section": "LUMBAR_REFERENCE",
-            "hospital_alias": "HOSP_PRIVATE",
-            "volume_cm3": None,
-            "preview_url": "/sample_data/kaggle_2d_demo/lumbar_mri/normal/mock_lumbar_normal.png",
-            "overlay_url": "/sample_data/kaggle_2d_demo/masks/mock_lumbar_mri_normal_overlay.png",
-            "memo": "Lumbar Spine MRI reference review only; not for disc, stenosis, or nerve compression diagnosis.",
-        },
-    ]
-    for row in seed_rows:
+    for row in seed_rows():
         study = db.query(Study).filter(Study.study_label == row["study_label"]).first()
         if study:
             for key, value in row.items():
                 setattr(study, key, value)
-            study.patient_code = "P001"
             study.is_sample_data = True
             study.model_3d_url = None
             continue
-        db.add(Study(patient_code="P001", is_sample_data=True, model_3d_url=None, **row))
+        db.add(Study(is_sample_data=True, model_3d_url=None, **row))
     db.commit()
     return db.query(Study).order_by(Study.study_label.asc()).all()

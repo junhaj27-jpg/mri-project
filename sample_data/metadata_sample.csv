@@ -1,6 +1,3 @@
-patient_code,study_label,event_type,section,hospital_alias,volume_cm3,memo
-P001,T01,surgery_follow_up,T01~T04,HOSP_A,52.8,비식별 샘플
-P001,T04,surgery_follow_up,T01~T04,HOSP_A,45.3,비식별 샘플
-P001,T05,hospital_transition,T04~T05,HOSP_B,44.9,병원 또는 장비 변경 가능성
-P001,T08,post_gamma_knife_follow_up,T08 이후,HOSP_B,39.4,3D 모델 예시 시점
-P001,T12,stable_follow_up,T09~T12,HOSP_B,38.5,안정 추적 예상
+patient_code,body_region,study_group,study_label,hospital_alias,quality_flag,comparison_role,finding_group,diagnosis_alias,note
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T01,HOSP_A,baseline_reference,reference_only,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo metadata only
+P001,LUMBAR_SPINE,LUMBAR_SPINE_REVIEW,LUMBAR_T01,HOSP_PRIVATE,private_reference,reference_review,SPINE_REGION_REVIEW,PRIVATE_DIAGNOSIS_REDACTED,mock lumbar private review placeholder; not for diagnosis

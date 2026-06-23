@@ -1,13 +1,15 @@
-study_label,volume_cm3,change_cm3,change_rate_percent,event_type
-T01,52.8,,,
-T02,50.1,-2.7,-5.11,surgery_follow_up
-T03,48.7,-1.4,-2.79,surgery_follow_up
-T04,45.3,-3.4,-6.98,surgery_follow_up
-T05,44.9,-0.4,-0.88,hospital_transition
-T06,42.0,-2.9,-6.46,chemo_period_estimated
-T07,40.8,-1.2,-2.86,chemo_period_estimated
-T08,39.4,-1.4,-3.43,post_gamma_knife_follow_up
-T09,39.1,-0.3,-0.76,stable_follow_up
-T10,38.9,-0.2,-0.51,stable_follow_up
-T11,38.7,-0.2,-0.51,stable_follow_up
-T12,38.5,-0.2,-0.52,stable_follow_up
+patient_code,body_region,study_group,study_label,period,event_group,hospital_alias,volume_cm3,quality_flag,comparison_role,finding_group,diagnosis_alias,note
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T01,BRAIN_T01~BRAIN_T04,initial_reference,HOSP_A,52.8,baseline_reference,reference_only,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value; cross-hospital comparison caution
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T02,BRAIN_T01~BRAIN_T04,initial_reference,HOSP_A,50.1,baseline_reference,reference_only,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value; cross-hospital comparison caution
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T03,BRAIN_T01~BRAIN_T04,initial_reference,HOSP_A,48.7,baseline_reference,reference_only,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value; cross-hospital comparison caution
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T04,BRAIN_T01~BRAIN_T04,initial_reference,HOSP_A,45.3,baseline_reference,reference_only,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value; cross-hospital comparison caution
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T05,BRAIN_T04~BRAIN_T05,hospital_transition,HOSP_B,44.9,transition_caution,transition_point,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value; hospital or scanner transition point
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T06,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,42.0,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T07,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,39.8,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T08,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,36.5,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T09,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,34.1,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T10,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,31.6,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T11,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,29.4,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T12,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,27.9,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T13,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,26.2,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
+P001,BRAIN,BRAIN_TARGET_TRACKING,BRAIN_T14,BRAIN_T06~BRAIN_T14,long_term_follow_up,HOSP_B,24.8,longitudinal_tracking,tracking_target,TARGET_REGION_TRACKING,PRIVATE_DIAGNOSIS_REDACTED,mock demo value
