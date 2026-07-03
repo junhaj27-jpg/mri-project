@@ -42,7 +42,7 @@ aidlc-mri/
     └── change_analysis.py
 ```
 
-## 기술 스택
+## 기본 기술 스택
 
 - Python
 - Streamlit
@@ -51,6 +51,20 @@ aidlc-mri/
 - matplotlib
 - reportlab
 - Docker
+
+## AI 추가 기술 스택
+
+향후 AI 기반 분석 보조 기능을 확장할 때 사용할 수 있는 기술 스택입니다. 이 기능들은 자동 진단 목적이 아니라 ROI 후보 제안, 영상 전처리, 변화 추적 보조, 연구용 모델 실험을 위한 확장 후보입니다.
+
+- PyTorch: 딥러닝 모델 학습 및 추론
+- MONAI: 의료영상 AI 파이프라인, 전처리, segmentation 모델 구성
+- SimpleITK: 의료영상 resampling, registration, spacing 처리
+- scikit-image: 영상 필터링, morphology, contour 처리
+- OpenCV: 이미지 전처리 및 시각화 보조
+- nibabel: NIfTI 형식 연동
+- ONNX Runtime: 학습된 모델의 경량 추론
+- MLflow: 실험 기록 및 모델 버전 관리
+- DVC: 의료영상 데이터셋 버전 관리
 
 ## 실행 방법
 
@@ -99,4 +113,7 @@ data/
 - 이미지가 포함된 PDF 리포트
 - 실제 drawing canvas 기반 ROI 입력
 - 검사 간 registration 및 자동 비교
+- AI 기반 ROI 후보 제안 기능
+- MONAI 기반 segmentation 연구 모듈
+- ONNX Runtime 기반 모델 추론 API
 
