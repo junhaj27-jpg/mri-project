@@ -5,6 +5,7 @@ import numpy as np
 import streamlit as st
 
 from utils.dicom_loader import load_dicom_volume
+from utils.skull_strip import brain_only_slice
 
 
 st.set_page_config(page_title="Brain MRI Viewer", layout="wide")
@@ -12,7 +13,8 @@ st.set_page_config(page_title="Brain MRI Viewer", layout="wide")
 
 def main() -> None:
     st.title("Brain MRI Viewer")
-    st.caption("DICOM 뇌 MRI 폴더를 불러와 axial slice만 확인하는 간단한 뷰어입니다.")
+    st.caption("DICOM 뇌 MRI 폴더를 불러와 axial slice를 확인하는 간단한 뷰어입니다.")
+    st.warning("진단 목적이 아닌 개인 확인용 뷰어입니다. 최종 판단은 의료진 판독을 따르세요.")
 
     folder_path = st.text_input("DICOM 폴더 경로", placeholder=r"C:\path\to\brain_mri_dicoms")
     if st.button("불러오기", type="primary"):
@@ -39,7 +41,10 @@ def show_viewer(volume: np.ndarray, info: dict) -> None:
         st.metric("Slices", total_slices)
         st.write(f"StudyDate: `{info.get('StudyDate', 'Unknown')}`")
         st.write(f"Series: `{info.get('SeriesDescription', 'Unknown')}`")
+
         slice_index = st.slider("Axial slice", 0, total_slices - 1, total_slices // 2)
+        brain_only = st.checkbox("뇌만 보기", value=True)
+        strip_strength = st.slider("두개골 제거 강도", 0, 10, 4)
 
         current = volume[slice_index]
         default_level = float(np.mean(current))
@@ -49,8 +54,11 @@ def show_viewer(volume: np.ndarray, info: dict) -> None:
         width = st.slider("Window width", 1.0, window_range, default_width)
 
     with right:
-        image = apply_window(volume[slice_index], level, width)
-        st.pyplot(draw_slice(image, slice_index, total_slices), clear_figure=True)
+        raw_slice = volume[slice_index]
+        if brain_only:
+            raw_slice = brain_only_slice(raw_slice, erode_pixels=strip_strength)
+        image = apply_window(raw_slice, level, width)
+        st.pyplot(draw_slice(image, slice_index, total_slices, brain_only), clear_figure=True)
 
 
 def apply_window(image: np.ndarray, level: float, width: float) -> np.ndarray:
@@ -62,10 +70,11 @@ def apply_window(image: np.ndarray, level: float, width: float) -> np.ndarray:
     return (image - low) / (high - low)
 
 
-def draw_slice(image: np.ndarray, slice_index: int, total_slices: int):
+def draw_slice(image: np.ndarray, slice_index: int, total_slices: int, brain_only: bool):
     fig, ax = plt.subplots(figsize=(7, 7))
     ax.imshow(image, cmap="gray", vmin=0, vmax=1)
-    ax.set_title(f"Axial slice {slice_index + 1} / {total_slices}")
+    suffix = "brain only" if brain_only else "original"
+    ax.set_title(f"Axial slice {slice_index + 1} / {total_slices} ({suffix})")
     ax.axis("off")
     fig.tight_layout()
     return fig
@@ -73,3 +82,4 @@ def draw_slice(image: np.ndarray, slice_index: int, total_slices: int):
 
 if __name__ == "__main__":
     main()
+
