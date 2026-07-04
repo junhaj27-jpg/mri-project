@@ -50,13 +50,18 @@ def load_dicom_volume(folder_path: str | Path) -> tuple[np.ndarray, dict]:
     return volume, info
 
 
-def slice_sort_key(path: Path, ds) -> tuple[int, str]:
-    """Sort by InstanceNumber with filename fallback."""
+def slice_sort_key(path: Path, ds) -> tuple[float, str]:
+    """Sort by InstanceNumber, with ImagePositionPatient and filename fallback."""
     try:
-        instance_number = int(getattr(ds, "InstanceNumber", 0))
+        instance_number = float(getattr(ds, "InstanceNumber"))
+        return instance_number, path.name
     except Exception:
-        instance_number = 0
-    return instance_number, path.name
+        pass
+
+    try:
+        return float(ds.ImagePositionPatient[2]), path.name
+    except Exception:
+        return 0.0, path.name
 
 
 def get_pixels(ds) -> np.ndarray:
@@ -79,7 +84,7 @@ def get_public_info(ds, volume: np.ndarray, skipped_files: int) -> dict:
         "StudyDate": format_dicom_date(str(getattr(ds, "StudyDate", "Unknown"))),
         "SeriesDescription": str(getattr(ds, "SeriesDescription", "Unknown")),
         "PixelSpacing": pixel_spacing,
-        "SliceThickness": float(getattr(ds, "SliceThickness", 1.0)),
+        "SliceThickness": safe_float(getattr(ds, "SliceThickness", 1.0), 1.0),
         "SliceCount": int(volume.shape[0]),
         "Shape": tuple(int(value) for value in volume.shape),
         "SkippedFiles": int(skipped_files),
@@ -91,3 +96,9 @@ def format_dicom_date(value: str) -> str:
         return f"{value[:4]}-{value[4:6]}-{value[6:]}"
     return value or "Unknown"
 
+
+def safe_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
