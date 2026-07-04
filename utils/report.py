@@ -9,10 +9,16 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table
 
 
 REPORT_DIR = Path("data/reports")
-DISCLAIMER = "This viewer is not for diagnosis. Final medical decisions must follow a clinician's interpretation."
+DISCLAIMER = "This viewer is not for diagnosis. Candidate regions are only visual aids. Final medical decisions must follow a clinician's interpretation."
 
 
-def create_viewer_report(info: dict, slice_index: int, brain_only: bool) -> Path:
+def create_viewer_report(
+    info: dict,
+    slice_index: int,
+    brain_only: bool,
+    tumor_enabled: bool = False,
+    tumor_area_mm2: float = 0.0,
+) -> Path:
     """Create a minimal PDF report under data/reports."""
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = REPORT_DIR / f"brain_mri_viewer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -26,6 +32,8 @@ def create_viewer_report(info: dict, slice_index: int, brain_only: bool) -> Path
         ["PixelSpacing", str(info.get("PixelSpacing", "Unknown"))],
         ["SliceThickness", str(info.get("SliceThickness", "Unknown"))],
         ["Volume shape", str(info.get("Shape", "Unknown"))],
+        ["Tumor candidate overlay", "On" if tumor_enabled else "Off"],
+        ["Candidate area", f"{tumor_area_mm2:.2f} mm2"],
     ]
 
     story = [
@@ -37,4 +45,3 @@ def create_viewer_report(info: dict, slice_index: int, brain_only: bool) -> Path
     ]
     SimpleDocTemplate(str(output_path), pagesize=A4).build(story)
     return output_path
-
