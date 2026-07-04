@@ -5,6 +5,7 @@ import numpy as np
 import streamlit as st
 
 from utils.dicom_loader import load_dicom_volume
+from utils.report import create_viewer_report
 from utils.skull_strip import brain_only_slice
 
 
@@ -23,6 +24,8 @@ def main() -> None:
             st.session_state["volume"] = volume
             st.session_state["info"] = info
             st.success("DICOM MRI를 불러왔습니다.")
+            if info.get("SkippedFiles", 0):
+                st.info(f"PixelData가 없거나 읽을 수 없어 건너뛴 파일: {info['SkippedFiles']}개")
         except Exception as exc:
             st.error(f"로드 실패: {exc}")
 
@@ -41,6 +44,7 @@ def show_viewer(volume: np.ndarray, info: dict) -> None:
         st.metric("Slices", total_slices)
         st.write(f"StudyDate: `{info.get('StudyDate', 'Unknown')}`")
         st.write(f"Series: `{info.get('SeriesDescription', 'Unknown')}`")
+        st.write(f"PixelSpacing: `{info.get('PixelSpacing', 'Unknown')}`")
 
         slice_index = st.slider("Axial slice", 0, total_slices - 1, total_slices // 2)
         brain_only = st.checkbox("뇌만 보기", value=True)
@@ -52,6 +56,12 @@ def show_viewer(volume: np.ndarray, info: dict) -> None:
         default_width = min(float(max(np.std(current) * 4, 1.0)), window_range)
         level = st.slider("Window level", float(np.min(volume)), float(np.max(volume)), default_level)
         width = st.slider("Window width", 1.0, window_range, default_width)
+
+        if st.button("PDF 리포트 생성"):
+            report_path = create_viewer_report(info, slice_index, brain_only)
+            st.success(f"PDF 생성 완료: {report_path}")
+            with report_path.open("rb") as file:
+                st.download_button("PDF 다운로드", file, report_path.name, "application/pdf")
 
     with right:
         raw_slice = volume[slice_index]

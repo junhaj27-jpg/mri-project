@@ -9,10 +9,12 @@ import pydicom
 def load_dicom_volume(folder_path: str | Path) -> tuple[np.ndarray, dict]:
     """Load a DICOM brain MRI folder as a 3D numpy volume.
 
-    Only .dcm files with PixelData are used. Slices are sorted by InstanceNumber.
-    PatientID is intentionally not returned for display.
+    Only .dcm files with PixelData are used. Slices are sorted by InstanceNumber
+    when available, and PatientID is intentionally not returned for display.
     """
     folder = Path(folder_path).expanduser()
+    if not str(folder_path).strip():
+        raise ValueError("DICOM folder path is empty.")
     if not folder.exists():
         raise FileNotFoundError(f"DICOM folder does not exist: {folder}")
     if not folder.is_dir():
@@ -23,18 +25,38 @@ def load_dicom_volume(folder_path: str | Path) -> tuple[np.ndarray, dict]:
         raise FileNotFoundError(f"No .dcm files found under: {folder}")
 
     slices = []
+    skipped = 0
     for path in paths:
-        ds = pydicom.dcmread(str(path), force=True)
-        if hasattr(ds, "PixelData"):
-            slices.append(ds)
+        try:
+            ds = pydicom.dcmread(str(path), force=True)
+            if hasattr(ds, "PixelData"):
+                slices.append((path, ds))
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
 
     if not slices:
-        raise ValueError("No DICOM files with PixelData were found.")
+        raise ValueError("No readable DICOM files with PixelData were found.")
 
-    slices.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0)))
-    volume = np.stack([get_pixels(ds) for ds in slices]).astype(np.float32)
-    info = get_public_info(slices[0], volume)
+    slices.sort(key=lambda item: slice_sort_key(item[0], item[1]))
+    arrays = [get_pixels(ds) for _, ds in slices]
+    first_shape = arrays[0].shape
+    if any(array.shape != first_shape for array in arrays):
+        raise ValueError("DICOM slices have different image sizes and cannot be stacked.")
+
+    volume = np.stack(arrays).astype(np.float32)
+    info = get_public_info(slices[0][1], volume, skipped)
     return volume, info
+
+
+def slice_sort_key(path: Path, ds) -> tuple[int, str]:
+    """Sort by InstanceNumber with filename fallback."""
+    try:
+        instance_number = int(getattr(ds, "InstanceNumber", 0))
+    except Exception:
+        instance_number = 0
+    return instance_number, path.name
 
 
 def get_pixels(ds) -> np.ndarray:
@@ -45,13 +67,22 @@ def get_pixels(ds) -> np.ndarray:
     return pixels * slope + intercept
 
 
-def get_public_info(ds, volume: np.ndarray) -> dict:
+def get_public_info(ds, volume: np.ndarray, skipped_files: int) -> dict:
     """Return minimal non-identifying metadata."""
+    pixel_spacing = getattr(ds, "PixelSpacing", [1.0, 1.0])
+    try:
+        pixel_spacing = [float(pixel_spacing[0]), float(pixel_spacing[1])]
+    except Exception:
+        pixel_spacing = [1.0, 1.0]
+
     return {
         "StudyDate": format_dicom_date(str(getattr(ds, "StudyDate", "Unknown"))),
         "SeriesDescription": str(getattr(ds, "SeriesDescription", "Unknown")),
+        "PixelSpacing": pixel_spacing,
+        "SliceThickness": float(getattr(ds, "SliceThickness", 1.0)),
         "SliceCount": int(volume.shape[0]),
         "Shape": tuple(int(value) for value in volume.shape),
+        "SkippedFiles": int(skipped_files),
     }
 
 
