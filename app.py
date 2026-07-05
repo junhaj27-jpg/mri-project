@@ -14,7 +14,7 @@ from mesh_builder import BrainMesh, build_brain_mesh_from_mask, export_stl
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, save_nifti_mask
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER, create_viewer_report
-from skull_stripping import run_skull_stripping
+from skull_stripping import get_skullstrip_status, run_skull_stripping
 
 
 DEFAULT_DATA_DIR = Path(r"C:\Users\user\Desktop\mri2\mri-project-main\data")
@@ -188,10 +188,13 @@ def show_2d_mode(mri_data: MRIData) -> None:
 
 
 def show_3d_mode(mri_data: MRIData) -> None:
+    skullstrip_status = get_skullstrip_status()
+    reliable_tool_available = any(skullstrip_status.values())
     with st.sidebar:
         st.subheader("Brain-only segmentation")
         method = st.selectbox("Skull stripping method", ["SynthStrip recommended", "HD-BET", "Simple fallback debug only"], index=0)
         method_key = "SynthStrip" if method.startswith("SynthStrip") else ("HD-BET" if method == "HD-BET" else "Simple fallback")
+        show_skullstrip_status(skullstrip_status, method)
         synthstrip_command = st.text_input("SynthStrip command", value="mri_synthstrip")
         hdbet_command = st.text_input("HD-BET command", value="hd-bet")
         hdbet_device = st.selectbox("HD-BET device", ["cuda", "cpu"], index=0)
@@ -216,14 +219,24 @@ def show_3d_mode(mri_data: MRIData) -> None:
         mesh_smoothing_enabled = st.checkbox("Mesh smoothing", value=True)
         smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 4)
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary")
-        sidebar_create_clicked = st.button("Generate 3D mesh", disabled=method.startswith("Simple fallback"))
+        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not reliable_tool_available)
 
     st.subheader("3D brain-only mesh")
+    if not reliable_tool_available:
+        st.warning("Reliable skull stripping tool is not installed. Install HD-BET or SynthStrip to generate final brain-only 3D.")
+        show_install_help()
+    if method.startswith("Simple fallback"):
+        st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
+
     cols = st.columns([1, 1, 1, 1])
     with cols[0]:
         main_preview_clicked = st.button("Generate refined mask", type="primary", use_container_width=True)
     with cols[1]:
-        main_create_clicked = st.button("Generate 3D mesh", use_container_width=True, disabled=method.startswith("Simple fallback"))
+        main_create_clicked = st.button(
+            "Generate final brain-only 3D mesh",
+            use_container_width=True,
+            disabled=method.startswith("Simple fallback") or not reliable_tool_available,
+        )
     with cols[2]:
         if st.button("Use default fast settings", use_container_width=True):
             threshold_scale = 1.0
@@ -239,6 +252,14 @@ def show_3d_mode(mri_data: MRIData) -> None:
 
     preview_clicked = sidebar_preview_clicked or main_preview_clicked
     create_clicked = sidebar_create_clicked or main_create_clicked
+    debug_create_clicked = False
+    with st.expander("Debug fallback 3D, not brain-only"):
+        st.warning("This is NOT brain-only. Debug only.")
+        debug_create_clicked = st.button("Generate debug fallback 3D", use_container_width=True)
+
+    if debug_create_clicked:
+        method_key = "Simple fallback"
+        preview_clicked = True
 
     if preview_clicked:
         try:
@@ -282,9 +303,16 @@ def show_3d_mode(mri_data: MRIData) -> None:
             st.session_state.pop("brain_mesh", None)
         except Exception as exc:
             log_exception("3D skull stripping failed", exc)
-            st.error("3D rendering failed. Check the log.")
-            st.exception(exc)
-            st.warning("2D viewer is still available.")
+            if "Reliable skull stripping tool is not available" in str(exc):
+                st.warning(
+                    "Brain-only 3D mesh requires reliable skull stripping. Install SynthStrip or HD-BET. "
+                    "Simple fallback is debug-only and cannot generate final 3D brain mesh."
+                )
+                show_install_help()
+            else:
+                st.error("3D rendering failed. Check the log.")
+                st.exception(exc)
+                st.warning("2D viewer is still available.")
             return
 
     raw_mask = st.session_state.get("raw_brain_mask")
@@ -322,6 +350,28 @@ def show_3d_mode(mri_data: MRIData) -> None:
         preview_mode=mask_preview_mode,
         opacity=mask_opacity,
     )
+
+    if debug_create_clicked:
+        st.warning("This is NOT brain-only. Debug only.")
+        try:
+            with st.spinner("Building debug fallback surface mesh..."):
+                mesh = cached_brain_mesh(
+                    filled_mask,
+                    mri_data.spacing,
+                    int(downsample_factor),
+                    int(step_size),
+                    int(smoothing_iterations),
+                    float(mesh_mask_gaussian_sigma),
+                    bool(mesh_smoothing_enabled),
+                )
+                mesh_path = export_stl(mesh, OUTPUT_DIR / "debug_fallback_mesh.stl")
+            st.session_state["brain_mesh"] = mesh
+            st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path}
+        except Exception as exc:
+            log_exception("Debug fallback mesh generation failed", exc)
+            st.error("Debug fallback 3D generation failed.")
+            st.exception(exc)
+            return
 
     if create_clicked:
         if debug_only_mask or not reliable_for_3d:
@@ -583,6 +633,47 @@ def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
         scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y", zaxis_title="z"),
     )
     return fig
+
+
+def show_skullstrip_status(status: dict[str, bool], selected_method: str) -> None:
+    st.caption("Skull stripping tools")
+    for command, installed in status.items():
+        label = "installed" if installed else "not found"
+        st.write(f"{command}: `{label}`")
+    final_enabled = any(status.values()) and not selected_method.startswith("Simple fallback")
+    st.write(f"Selected method: `{selected_method}`")
+    st.write(f"Final 3D mesh: `{'available' if final_enabled else 'disabled'}`")
+
+
+def show_install_help() -> None:
+    with st.expander("Install reliable skull stripping tools", expanded=True):
+        st.markdown(
+            """
+Windows PowerShell:
+
+```powershell
+python -m pip install --upgrade pip
+pip install hd-bet
+```
+
+After installation:
+
+```powershell
+where hd-bet
+where HD_BET
+python -m HD_BET -h
+```
+
+If the command is still not found, check the virtualenv Scripts path:
+
+```powershell
+.venv\\Scripts\\hd-bet.exe
+.venv\\Scripts\\HD_BET.exe
+```
+
+SynthStrip usually requires FreeSurfer/SynthStrip installation. Final brain-only 3D mesh is enabled only when SynthStrip or HD-BET is available.
+"""
+        )
 
 
 def mesh_output_path(mask_meta: dict) -> Path:

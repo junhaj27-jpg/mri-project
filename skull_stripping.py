@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,32 @@ class SkullStripResult:
     debug_only: bool
     metadata: dict
     warnings: list[str]
+
+
+def check_command_exists(command: str) -> bool:
+    return shutil.which(command) is not None
+
+
+def get_skullstrip_status() -> dict[str, bool]:
+    return {
+        "mri_synthstrip": check_command_exists("mri_synthstrip"),
+        "hd-bet": check_command_exists("hd-bet"),
+        "HD_BET": check_command_exists("HD_BET"),
+        "python -m HD_BET": module_exists("HD_BET"),
+    }
+
+
+def module_exists(module_name: str) -> bool:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", module_name, "-h"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def run_skull_stripping(
@@ -93,6 +120,7 @@ def run_skull_stripping(
                     "debug_only": False,
                 }
             else:
+                mask_path = output_dir / "debug_fallback_mask.nii.gz"
                 mask, metadata = create_brain_mask(
                     mri_data.volume,
                     threshold_scale=threshold_scale,
@@ -128,7 +156,12 @@ def run_skull_stripping(
             refined_mask_path = save_nifti_mask(refined_mask, mri_data.affine, refined_mask_path)
             filled_mask_path = save_nifti_mask(filled_mask, mri_data.affine, filled_mask_path)
             brain_path = save_brain_extracted(mri_data.volume, filled_mask, mri_data.affine, brain_path)
-            quality_warnings = validate_brain_mask(filled_mask, mri_data.volume.shape)
+            quality_warnings = validate_brain_mask(
+                filled_mask,
+                mri_data.volume.shape,
+                source=str(metadata.get("method", attempt)),
+                debug_only=bool(metadata.get("debug_only", False)),
+            )
             return SkullStripResult(
                 raw_mask=raw_mask,
                 refined_mask=refined_mask,
@@ -163,6 +196,8 @@ def run_skull_stripping(
 
 
 def run_synthstrip(input_path: Path, brain_path: Path, mask_path: Path, command: str) -> np.ndarray:
+    if not check_command_exists(command):
+        raise FileNotFoundError(f"Command not found: {command}")
     executable = resolve_command(command)
     subprocess.run(
         [executable, "-i", str(input_path), "-o", str(brain_path), "-m", str(mask_path)],
@@ -177,16 +212,38 @@ def run_synthstrip(input_path: Path, brain_path: Path, mask_path: Path, command:
 
 
 def run_hdbet(input_path: Path, brain_path: Path, mask_path: Path, command: str, device: str = "cuda") -> np.ndarray:
-    executable = resolve_command(command)
     output_no_ext = strip_nii_suffix(brain_path)
     device = "cuda" if str(device).lower() in {"cuda", "gpu"} else "cpu"
-    subprocess.run(
-        [executable, "-i", str(input_path), "-o", str(output_no_ext), "-device", device, "-mode", "fast"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=900,
-    )
+    command_candidates = []
+    if command:
+        command_candidates.append([command])
+    command_candidates.extend([["hd-bet"], ["HD_BET"], [sys.executable, "-m", "HD_BET"]])
+    seen = set()
+    last_error: Exception | None = None
+    for base_cmd in command_candidates:
+        key = tuple(base_cmd)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if len(base_cmd) == 1:
+                executable = resolve_command(base_cmd[0])
+                cmd = [executable]
+            else:
+                cmd = base_cmd
+            subprocess.run(
+                cmd + ["-i", str(input_path), "-o", str(output_no_ext), "-device", device, "-mode", "fast"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+            break
+        except Exception as exc:
+            last_error = exc
+    else:
+        raise RuntimeError(f"HD-BET failed with all command candidates: {last_error}")
+
     candidates = [
         mask_path,
         output_no_ext.with_name(output_no_ext.name + "_mask.nii.gz"),
@@ -234,18 +291,36 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
     return largest_connected_component(mask)
 
 
-def validate_brain_mask(mask: np.ndarray, shape: tuple[int, ...]) -> list[str]:
+def validate_brain_mask(
+    mask: np.ndarray,
+    shape: tuple[int, ...],
+    source: str = "Unknown",
+    debug_only: bool = False,
+) -> list[str]:
     warnings: list[str] = []
+    source_text = str(source)
+    if debug_only or source_text.lower().startswith("simple fallback"):
+        warnings.append("Simple fallback mask is debug-only and cannot generate final brain-only 3D mesh.")
+    if source_text not in {"SynthStrip", "HD-BET"}:
+        warnings.append("Mask source must be SynthStrip or HD-BET for final 3D brain mesh.")
+
     voxels = int(np.count_nonzero(mask))
     total = int(np.prod(shape))
     ratio = voxels / max(total, 1)
-    if ratio > 0.35:
-        warnings.append("Mask is large; skull/face/neck may still be included.")
-    if ratio < 0.02:
+    if ratio > 0.28:
+        warnings.append("Mask is too large; skull/face/neck may still be included.")
+    if ratio < 0.015:
         warnings.append("Mask is very small; brain tissue may be missing.")
+
     labels = measure.label(mask)
     if labels.max() > 1:
-        warnings.append("Mask has multiple components; small fragments may remain.")
+        component_sizes = np.bincount(labels.ravel())
+        component_sizes[0] = 0
+        largest = int(component_sizes.max()) if component_sizes.size else 0
+        fragments = int(np.count_nonzero(component_sizes > max(64, largest * 0.01)))
+        if fragments > 1:
+            warnings.append("Mask has multiple connected components; skull stripping is not reliable.")
+
     coords = np.argwhere(mask)
     if coords.size:
         lower = coords.min(axis=0)
@@ -253,6 +328,25 @@ def validate_brain_mask(mask: np.ndarray, shape: tuple[int, ...]) -> list[str]:
         if np.any(lower <= 1) or np.any(upper >= np.array(shape) - 2):
             warnings.append("Mask touches image border; non-brain tissue may remain.")
         extent = (upper - lower + 1) / np.maximum(np.array(shape), 1)
-        if np.any(extent > 0.92):
-            warnings.append("Mask spans almost the full image axis; face/head/skull may still be included.")
+        if np.any(extent > 0.88):
+            warnings.append("Mask bounding box is too large; head/skull/neck may still be included.")
+        if extent[1] > 0.82:
+            warnings.append("Mask extends too far along the superior/inferior axis; neck or skull may be included.")
+
+        center = np.array(shape, dtype=np.float32) / 2.0
+        radii = np.maximum(np.array(shape, dtype=np.float32) * 0.12, 1.0)
+        grid = np.indices(shape, dtype=np.float32)
+        center_region = np.zeros(shape, dtype=np.float32)
+        for axis in range(3):
+            center_region += ((grid[axis] - center[axis]) / radii[axis]) ** 2
+        center_region = center_region <= 1.0
+        center_coverage = float(np.count_nonzero(mask & center_region)) / max(int(np.count_nonzero(center_region)), 1)
+        if center_coverage < 0.25:
+            warnings.append("Mask does not sufficiently include the central brain region.")
+
+        filled = ndi.binary_fill_holes(mask.astype(bool))
+        hole_voxels = int(np.count_nonzero(filled & ~mask.astype(bool)))
+        hole_ratio = hole_voxels / max(int(np.count_nonzero(filled)), 1)
+        if hole_ratio > 0.08:
+            warnings.append("Mask has too many internal holes; skull stripping failed.")
     return warnings
