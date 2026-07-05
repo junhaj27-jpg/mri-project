@@ -249,7 +249,7 @@ def run_hdbet(
             )
             continue
         try:
-            hdbet_args = ["-i", str(input_path), "-o", str(output_no_ext), "-device", device, "--save_bet_mask"]
+            hdbet_args = ["-i", str(input_path), "-o", str(brain_path), "-device", device, "--save_bet_mask"]
             if device == "cpu":
                 hdbet_args.append("--disable_tta")
             result = subprocess.run(
