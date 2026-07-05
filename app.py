@@ -80,7 +80,7 @@ def load_input(source_mode: str) -> MRIData | None:
             upload_path.write_bytes(uploaded.getbuffer())
             if st.button("Load NIfTI", type="primary") or st.session_state.get("loaded_path") != str(upload_path):
                 with st.spinner("Loading NIfTI volume..."):
-                    st.session_state["loaded_mri"] = load_nifti(upload_path)
+                    st.session_state["loaded_mri"] = cached_load_nifti(str(upload_path))
                     st.session_state["loaded_path"] = str(upload_path)
             return st.session_state.get("loaded_mri")
 
@@ -89,7 +89,7 @@ def load_input(source_mode: str) -> MRIData | None:
 
     if scan_clicked or "series" not in st.session_state:
         try:
-            st.session_state["series"] = discover_dicom_series(folder_path)
+            st.session_state["series"] = cached_discover_dicom_series(folder_path)
         except Exception as exc:
             st.session_state["series"] = []
             st.error(f"Series scan failed: {exc}")
@@ -109,10 +109,25 @@ def load_input(source_mode: str) -> MRIData | None:
 
     if load_clicked or st.session_state.get("loaded_key") != selected["key"]:
         with st.spinner("Loading DICOM volume..."):
-            st.session_state["loaded_mri"] = load_dicom(selected["paths"])
+            st.session_state["loaded_mri"] = cached_load_dicom(tuple(str(path) for path in selected["paths"]))
             st.session_state["loaded_key"] = selected["key"]
             clear_mesh_state()
     return st.session_state.get("loaded_mri")
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def cached_discover_dicom_series(folder_path: str) -> list[dict]:
+    return discover_dicom_series(folder_path)
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def cached_load_dicom(paths: tuple[str, ...]) -> MRIData:
+    return load_dicom(paths)
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def cached_load_nifti(path: str) -> MRIData:
+    return load_nifti(path)
 
 
 def show_2d_mode(mri_data: MRIData) -> None:
@@ -276,7 +291,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         for warning in warnings:
             st.warning(warning)
     if debug_only_mask:
-        st.warning("Simple fallback is debug only. It is not allowed for brain-only 3D mesh generation.")
+        st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
 
     if mask is None:
         st.info("First create and inspect the brain_mask overlay. Then create the 3D mesh from that mask.")
@@ -296,7 +311,10 @@ def show_3d_mode(mri_data: MRIData) -> None:
 
     if create_clicked:
         if debug_only_mask or not reliable_for_3d:
-            st.warning("Reliable skull stripping tool is not available. Install SynthStrip or HD-BET to generate brain-only 3D mesh.")
+            st.warning(
+                "Brain-only 3D mesh requires reliable skull stripping. Install SynthStrip or HD-BET. "
+                "Simple fallback is debug-only and cannot generate final 3D brain mesh."
+            )
             return
         if quality_warnings:
             st.warning("Mask quality warning: mesh may be inaccurate. Fix the overlay before generating 3D.")
@@ -313,7 +331,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
                     float(mesh_mask_gaussian_sigma),
                     bool(mesh_smoothing_enabled),
                 )
-                mesh_path = export_stl(mesh, MESH_PATH)
+                mesh_path = export_stl(mesh, mesh_output_path(mask_meta))
             st.session_state["brain_mesh"] = mesh
             st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path}
         except Exception as exc:
@@ -333,6 +351,10 @@ def show_3d_mode(mri_data: MRIData) -> None:
     with left:
         st.subheader("Brain Mask / Mesh")
         st.write(f"Mask method: `{mask_meta.get('method', 'Unknown')}`")
+        st.write(f"Mask source: `{mask_meta.get('method', 'Unknown')}`")
+        status_text, reason_text = mesh_status(mask_meta, reliable_for_3d, debug_only_mask, quality_warnings)
+        st.write(f"3D status: `{status_text}`")
+        st.write(f"Reason: `{reason_text}`")
         st.write(f"Threshold: `{mask_meta.get('threshold', 'Unknown')}`")
         st.write(f"Raw mask voxels: `{mask_meta.get('raw_voxels', 'Unknown')}`")
         st.write(f"Cleaned mask voxels: `{mask_meta.get('cleaned_voxels', 'Unknown')}`")
@@ -458,6 +480,16 @@ def show_mask_preview(
     with left:
         st.subheader("Brain mask preview")
         st.write(f"Method: `{mask_meta.get('method', 'Unknown')}`")
+        preview_quality_warnings = list(mask_meta.get("quality_warnings", []))
+        preview_status, preview_reason = mesh_status(
+            mask_meta,
+            bool(mask_meta.get("reliable_for_3d", False)),
+            bool(mask_meta.get("debug_only", False)),
+            preview_quality_warnings,
+        )
+        st.write(f"Mask source: `{mask_meta.get('method', 'Unknown')}`")
+        st.write(f"3D status: `{preview_status}`")
+        st.write(f"Reason: `{preview_reason}`")
         st.write(f"Raw voxels: `{mask_meta.get('raw_voxels', int(np.count_nonzero(raw_mask)) if raw_mask is not None else 'Unknown')}`")
         st.write(f"Cleaned voxels: `{mask_meta.get('cleaned_voxels', int(np.count_nonzero(cleaned_mask)) if cleaned_mask is not None else 'Unknown')}`")
         st.write(f"Filled voxels: `{mask_meta.get('voxels', int(np.count_nonzero(filled_mask)))}`")
@@ -537,6 +569,26 @@ def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
         scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y", zaxis_title="z"),
     )
     return fig
+
+
+def mesh_output_path(mask_meta: dict) -> Path:
+    method = str(mask_meta.get("method", "")).lower()
+    if "synthstrip" in method:
+        return OUTPUT_DIR / "brain_mesh_synthstrip.stl"
+    if "hd-bet" in method:
+        return OUTPUT_DIR / "brain_mesh_hdbet.stl"
+    return MESH_PATH
+
+
+def mesh_status(mask_meta: dict, reliable_for_3d: bool, debug_only_mask: bool, quality_warnings: list[str]) -> tuple[str, str]:
+    method = str(mask_meta.get("method", "Unknown"))
+    if debug_only_mask or method.lower().startswith("simple fallback"):
+        return "Disabled", "fallback mask does not produce reliable brain-only mesh"
+    if not reliable_for_3d:
+        return "Disabled", "SynthStrip or HD-BET mask is required"
+    if quality_warnings:
+        return "Disabled", "; ".join(quality_warnings)
+    return "Enabled", "validated SynthStrip/HD-BET brain mask"
 
 
 def ensure_brain_mask(mri_data: MRIData) -> np.ndarray:
