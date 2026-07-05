@@ -308,6 +308,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
                     "Brain-only 3D mesh requires reliable skull stripping. Install SynthStrip or HD-BET. "
                     "Simple fallback is debug-only and cannot generate final 3D brain mesh."
                 )
+                show_command_attempts_text(str(exc))
                 show_install_help()
             else:
                 st.error("3D rendering failed. Check the log.")
@@ -350,6 +351,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         preview_mode=mask_preview_mode,
         opacity=mask_opacity,
     )
+    show_command_attempts(mask_meta.get("tool_attempts", []))
 
     if debug_create_clicked:
         st.warning("This is NOT brain-only. Debug only.")
@@ -674,6 +676,32 @@ If the command is still not found, check the virtualenv Scripts path:
 SynthStrip usually requires FreeSurfer/SynthStrip installation. Final brain-only 3D mesh is enabled only when SynthStrip or HD-BET is available.
 """
         )
+
+
+def show_command_attempts(attempts: list[dict]) -> None:
+    if not attempts:
+        return
+    with st.expander("HD-BET command attempts", expanded=False):
+        for attempt in attempts:
+            st.markdown(f"**{attempt.get('label', 'command')}**: `{attempt.get('status', 'unknown')}`")
+            st.code(str(attempt.get("command", "")), language="powershell")
+            if attempt.get("returncode") is not None:
+                st.write(f"returncode: `{attempt.get('returncode')}`")
+            stdout = str(attempt.get("stdout") or "").strip()
+            stderr = str(attempt.get("stderr") or "").strip()
+            if stdout:
+                st.caption("stdout")
+                st.code(stdout[-4000:])
+            if stderr:
+                st.caption("stderr")
+                st.code(stderr[-4000:])
+
+
+def show_command_attempts_text(text: str) -> None:
+    if "HD-BET failed with all command candidates" not in text and "HD-BET unavailable/failed" not in text:
+        return
+    with st.expander("HD-BET command attempts", expanded=True):
+        st.code(text[-8000:])
 
 
 def mesh_output_path(mask_meta: dict) -> Path:

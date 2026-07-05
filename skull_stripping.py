@@ -37,10 +37,13 @@ def check_command_exists(command: str) -> bool:
 
 
 def get_skullstrip_status() -> dict[str, bool]:
+    venv_scripts = project_venv_scripts_dir()
     return {
         "mri_synthstrip": check_command_exists("mri_synthstrip"),
         "hd-bet": check_command_exists("hd-bet"),
         "HD_BET": check_command_exists("HD_BET"),
+        r".venv\Scripts\hd-bet.exe": (venv_scripts / "hd-bet.exe").exists(),
+        r".venv\Scripts\HD_BET.exe": (venv_scripts / "HD_BET.exe").exists(),
         "python -m HD_BET": module_exists("HD_BET"),
     }
 
@@ -109,11 +112,18 @@ def run_skull_stripping(
             elif attempt == "HD-BET":
                 tool_mask_path = output_dir / "brain_mask_hdbet.nii.gz"
                 tool_brain_path = output_dir / "brain_extracted_hdbet.nii.gz"
-                mask = run_hdbet(input_path, tool_brain_path, tool_mask_path, hdbet_command, hdbet_device)
+                mask, tool_attempts = run_hdbet(
+                    input_path,
+                    tool_brain_path,
+                    tool_mask_path,
+                    hdbet_command,
+                    hdbet_device,
+                )
                 metadata = {
                     "method": "HD-BET",
                     "command": hdbet_command,
                     "device": hdbet_device,
+                    "tool_attempts": tool_attempts,
                     "tool_mask_path": str(tool_mask_path),
                     "tool_brain_path": str(tool_brain_path),
                     "reliable_for_3d": True,
@@ -211,38 +221,75 @@ def run_synthstrip(input_path: Path, brain_path: Path, mask_path: Path, command:
     return load_nifti_mask(mask_path)
 
 
-def run_hdbet(input_path: Path, brain_path: Path, mask_path: Path, command: str, device: str = "cuda") -> np.ndarray:
+def run_hdbet(
+    input_path: Path,
+    brain_path: Path,
+    mask_path: Path,
+    command: str,
+    device: str = "cuda",
+) -> tuple[np.ndarray, list[dict]]:
     output_no_ext = strip_nii_suffix(brain_path)
     device = "cuda" if str(device).lower() in {"cuda", "gpu"} else "cpu"
-    command_candidates = []
-    if command:
-        command_candidates.append([command])
-    command_candidates.extend([["hd-bet"], ["HD_BET"], [sys.executable, "-m", "HD_BET"]])
-    seen = set()
-    last_error: Exception | None = None
-    for base_cmd in command_candidates:
-        key = tuple(base_cmd)
-        if key in seen:
+    attempts: list[dict] = []
+    for candidate in hdbet_command_candidates(command):
+        label = str(candidate["label"])
+        cmd = list(candidate["cmd"])
+        resolved = bool(candidate.get("resolved", True))
+        if not resolved:
+            attempts.append(
+                {
+                    "label": label,
+                    "command": " ".join(cmd),
+                    "status": "not found",
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": str(candidate.get("error", "command not found")),
+                }
+            )
             continue
-        seen.add(key)
         try:
-            if len(base_cmd) == 1:
-                executable = resolve_command(base_cmd[0])
-                cmd = [executable]
-            else:
-                cmd = base_cmd
-            subprocess.run(
+            result = subprocess.run(
                 cmd + ["-i", str(input_path), "-o", str(output_no_ext), "-device", device, "-mode", "fast"],
                 check=True,
                 capture_output=True,
                 text=True,
                 timeout=900,
             )
+            attempts.append(
+                {
+                    "label": label,
+                    "command": " ".join(cmd),
+                    "status": "succeeded",
+                    "returncode": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+            )
             break
+        except subprocess.CalledProcessError as exc:
+            attempts.append(
+                {
+                    "label": label,
+                    "command": " ".join(cmd),
+                    "status": "failed",
+                    "returncode": exc.returncode,
+                    "stdout": exc.stdout or "",
+                    "stderr": exc.stderr or "",
+                }
+            )
         except Exception as exc:
-            last_error = exc
+            attempts.append(
+                {
+                    "label": label,
+                    "command": " ".join(cmd),
+                    "status": "failed",
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": repr(exc),
+                }
+            )
     else:
-        raise RuntimeError(f"HD-BET failed with all command candidates: {last_error}")
+        raise RuntimeError("HD-BET failed with all command candidates:\n" + format_command_attempts(attempts))
 
     candidates = [
         mask_path,
@@ -251,8 +298,71 @@ def run_hdbet(input_path: Path, brain_path: Path, mask_path: Path, command: str,
     ]
     for candidate in candidates:
         if candidate.exists():
-            return load_nifti_mask(candidate)
+            return load_nifti_mask(candidate), attempts
     raise FileNotFoundError("HD-BET did not create a mask file.")
+
+
+def project_venv_scripts_dir() -> Path:
+    return Path(__file__).resolve().parent / ".venv" / "Scripts"
+
+
+def hdbet_command_candidates(command: str | None = None) -> list[dict]:
+    venv_scripts = project_venv_scripts_dir()
+    candidates = [
+        command_candidate_from_which("hd-bet"),
+        command_candidate_from_which("HD_BET"),
+        command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
+        command_candidate_from_path(r".venv\Scripts\HD_BET.exe", venv_scripts / "HD_BET.exe"),
+        {
+            "label": "python -m HD_BET",
+            "cmd": [sys.executable, "-m", "HD_BET"],
+            "resolved": True,
+            "error": "",
+        },
+    ]
+    custom = str(command or "").strip()
+    if custom and custom.lower() not in {"hd-bet", "hd_bet"} and custom not in {str(item["cmd"][0]) for item in candidates if item["cmd"]}:
+        candidates.insert(0, command_candidate_from_custom(custom))
+    return candidates
+
+
+def command_candidate_from_which(command: str) -> dict:
+    found = shutil.which(command)
+    if found:
+        return {"label": command, "cmd": [found], "resolved": True, "error": ""}
+    return {"label": command, "cmd": [command], "resolved": False, "error": f"Command not found: {command}"}
+
+
+def command_candidate_from_path(label: str, path: Path) -> dict:
+    if path.exists():
+        return {"label": label, "cmd": [str(path)], "resolved": True, "error": ""}
+    return {"label": label, "cmd": [str(path)], "resolved": False, "error": f"File not found: {path}"}
+
+
+def command_candidate_from_custom(command: str) -> dict:
+    path = Path(command)
+    if path.exists():
+        return {"label": command, "cmd": [str(path)], "resolved": True, "error": ""}
+    found = shutil.which(command)
+    if found:
+        return {"label": command, "cmd": [found], "resolved": True, "error": ""}
+    return {"label": command, "cmd": [command], "resolved": False, "error": f"Command not found: {command}"}
+
+
+def format_command_attempts(attempts: list[dict]) -> str:
+    lines: list[str] = []
+    for attempt in attempts:
+        lines.append(f"- {attempt.get('label')}: {attempt.get('status')}")
+        lines.append(f"  command: {attempt.get('command')}")
+        if attempt.get("returncode") is not None:
+            lines.append(f"  returncode: {attempt.get('returncode')}")
+        stdout = str(attempt.get("stdout") or "").strip()
+        stderr = str(attempt.get("stderr") or "").strip()
+        if stdout:
+            lines.append(f"  stdout: {stdout[-2000:]}")
+        if stderr:
+            lines.append(f"  stderr: {stderr[-2000:]}")
+    return "\n".join(lines)
 
 
 def resolve_command(command: str) -> str:
