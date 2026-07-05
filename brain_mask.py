@@ -101,6 +101,68 @@ def refine_brain_mask(
     return mask.astype(np.uint8), metadata
 
 
+def create_filled_brain_surface_mask(
+    cleaned_mask: np.ndarray,
+    hole_area_threshold: int = 12000,
+    closing_radius: int = 4,
+    min_object_size: int = 20000,
+) -> tuple[np.ndarray, dict]:
+    """
+    Create a closed surface mask for 3D only.
+    This intentionally fills internal CSF/ventricle holes so marching cubes gets
+    a stable outer brain surface rather than a broken parenchyma mask.
+    """
+    mask = cleaned_mask.astype(bool)
+    if not np.any(mask):
+        return mask.astype(np.uint8), {
+            "surface_mask": "empty mask",
+            "surface_components": 0,
+            "surface_voxels": 0,
+            "surface_hole_area_threshold": int(hole_area_threshold),
+            "surface_closing_radius": int(closing_radius),
+            "surface_min_object_size": int(min_object_size),
+        }
+
+    initial_voxels = int(np.count_nonzero(mask))
+    mask = largest_connected_component(mask)
+    min_size = max(0, int(min_object_size))
+    if min_size > 0:
+        mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = largest_connected_component(mask)
+
+    mask = fill_internal_holes_by_slices(mask)
+    mask = ndi.binary_fill_holes(mask)
+
+    hole_threshold = max(0, int(hole_area_threshold))
+    if hole_threshold > 0:
+        mask = morphology.remove_small_holes(mask, area_threshold=hole_threshold)
+
+    radius = max(1, int(closing_radius))
+    mask = morphology.binary_closing(mask, morphology.ball(radius))
+    mask = ndi.binary_fill_holes(mask)
+    mask = morphology.binary_dilation(mask, morphology.ball(1))
+    mask = morphology.binary_erosion(mask, morphology.ball(1))
+    mask = morphology.binary_opening(mask, morphology.ball(1))
+    mask = morphology.binary_closing(mask, morphology.ball(max(1, radius - 1)))
+    mask = fill_internal_holes_by_slices(mask)
+    mask = ndi.binary_fill_holes(mask)
+    if min_size > 0:
+        mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = largest_connected_component(mask)
+    mask = ndi.binary_fill_holes(mask)
+
+    metadata = {
+        "surface_mask": "largest_component + small_object cleanup + fill_holes + remove_small_holes + closing/opening",
+        "surface_components": int(measure.label(mask).max()),
+        "surface_initial_voxels": initial_voxels,
+        "surface_voxels": int(np.count_nonzero(mask)),
+        "surface_hole_area_threshold": hole_threshold,
+        "surface_closing_radius": radius,
+        "surface_min_object_size": min_size,
+    }
+    return mask.astype(np.uint8), metadata
+
+
 def fill_internal_holes_by_slices(mask: np.ndarray) -> np.ndarray:
     filled = mask.astype(bool)
     for axis in range(3):

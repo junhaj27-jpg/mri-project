@@ -21,6 +21,7 @@ DEFAULT_DATA_DIR = Path(r"C:\Users\user\Desktop\mri2\mri-project-main\data")
 OUTPUT_DIR = Path("outputs")
 MASK_PATH = OUTPUT_DIR / "brain_mask.nii.gz"
 REFINED_MASK_PATH = OUTPUT_DIR / "refined_brain_mask.nii.gz"
+FILLED_MASK_PATH = OUTPUT_DIR / "filled_brain_mask.nii.gz"
 MESH_PATH = OUTPUT_DIR / "brain_mesh.stl"
 BRAIN_PATH = OUTPUT_DIR / "brain_extracted.nii.gz"
 
@@ -160,14 +161,19 @@ def show_2d_mode(mri_data: MRIData) -> None:
 def show_3d_mode(mri_data: MRIData) -> None:
     with st.sidebar:
         st.subheader("Brain-only segmentation")
-        method = st.selectbox("Skull stripping method", ["SynthStrip", "HD-BET", "Simple fallback"], index=0)
+        method = st.selectbox("Skull stripping method", ["SynthStrip recommended", "HD-BET", "Simple fallback debug only"], index=0)
+        method_key = "SynthStrip" if method.startswith("SynthStrip") else ("HD-BET" if method == "HD-BET" else "Simple fallback")
         synthstrip_command = st.text_input("SynthStrip command", value="mri_synthstrip")
         hdbet_command = st.text_input("HD-BET command", value="hd-bet")
         hdbet_device = st.selectbox("HD-BET device", ["cuda", "cpu"], index=0)
         threshold_scale = st.slider("Brain mask threshold", 0.5, 1.5, 1.0, 0.05)
         peel_iterations = st.slider("Skin/skull peel iterations", 0, 10, 5)
         st.subheader("Mask refinement")
-        mask_preview_mode = st.selectbox("Mask preview mode", ["Refined mask", "Raw mask", "Raw + refined", "Extracted brain", "Mesh"], index=0)
+        mask_preview_mode = st.selectbox(
+            "Mask preview mode",
+            ["Filled mask", "Cleaned mask", "Raw mask", "Raw + cleaned + filled", "Extracted brain", "Mesh"],
+            index=0,
+        )
         fill_holes = st.checkbox("Fill holes", value=True)
         closing_radius = st.slider("Closing radius", 1, 8, 3)
         remove_small_holes_threshold = st.slider("Remove small holes threshold", 1000, 20000, 5000, step=500)
@@ -181,14 +187,14 @@ def show_3d_mode(mri_data: MRIData) -> None:
         mesh_smoothing_enabled = st.checkbox("Mesh smoothing", value=True)
         smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 4)
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary")
-        sidebar_create_clicked = st.button("Generate 3D mesh")
+        sidebar_create_clicked = st.button("Generate 3D mesh", disabled=method.startswith("Simple fallback"))
 
     st.subheader("3D brain-only mesh")
     cols = st.columns([1, 1, 1, 1])
     with cols[0]:
         main_preview_clicked = st.button("Generate refined mask", type="primary", use_container_width=True)
     with cols[1]:
-        main_create_clicked = st.button("Generate 3D mesh", use_container_width=True)
+        main_create_clicked = st.button("Generate 3D mesh", use_container_width=True, disabled=method.startswith("Simple fallback"))
     with cols[2]:
         if st.button("Use default fast settings", use_container_width=True):
             threshold_scale = 1.0
@@ -215,7 +221,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
                     mri_data.info,
                     mri_data.source_type,
                     mri_data.source_label,
-                    method,
+                    method_key,
                     str(OUTPUT_DIR),
                     synthstrip_command,
                     hdbet_command,
@@ -229,14 +235,19 @@ def show_3d_mode(mri_data: MRIData) -> None:
                     float(mask_smoothing_sigma),
                 )
             st.session_state["raw_brain_mask"] = result.raw_mask
+            st.session_state["cleaned_brain_mask"] = result.refined_mask
+            st.session_state["filled_brain_mask"] = result.filled_mask
             st.session_state["refined_brain_mask"] = result.refined_mask
-            st.session_state["brain_mask"] = result.refined_mask
+            st.session_state["brain_mask"] = result.filled_mask
             st.session_state["mask_meta"] = result.metadata
             st.session_state["skull_strip_warnings"] = result.warnings
+            st.session_state["reliable_for_3d"] = result.reliable_for_3d
+            st.session_state["debug_only_mask"] = result.debug_only
             st.session_state["brain_extracted"] = result.brain_extracted
             st.session_state["mesh_info"] = {
                 "mask_path": result.mask_path,
                 "refined_mask_path": result.refined_mask_path,
+                "filled_mask_path": result.filled_mask_path,
                 "brain_path": result.brain_path,
             }
             st.session_state.pop("brain_mesh", None)
@@ -248,16 +259,24 @@ def show_3d_mode(mri_data: MRIData) -> None:
             return
 
     raw_mask = st.session_state.get("raw_brain_mask")
-    refined_mask = st.session_state.get("refined_brain_mask")
-    if refined_mask is None:
-        refined_mask = st.session_state.get("brain_mask")
-    mask = refined_mask
+    cleaned_mask = st.session_state.get("cleaned_brain_mask")
+    if cleaned_mask is None:
+        cleaned_mask = st.session_state.get("refined_brain_mask")
+    filled_mask = st.session_state.get("filled_brain_mask")
+    if filled_mask is None:
+        filled_mask = st.session_state.get("brain_mask")
+    mask = filled_mask
     mask_meta = st.session_state.get("mask_meta", {})
     mesh_info = st.session_state.get("mesh_info", {})
     warnings = st.session_state.get("skull_strip_warnings", [])
+    quality_warnings = list(mask_meta.get("quality_warnings", []))
+    reliable_for_3d = bool(st.session_state.get("reliable_for_3d", False))
+    debug_only_mask = bool(st.session_state.get("debug_only_mask", False))
     if warnings:
         for warning in warnings:
             st.warning(warning)
+    if debug_only_mask:
+        st.warning("Simple fallback is debug only. It is not allowed for brain-only 3D mesh generation.")
 
     if mask is None:
         st.info("First create and inspect the brain_mask overlay. Then create the 3D mesh from that mask.")
@@ -266,7 +285,8 @@ def show_3d_mode(mri_data: MRIData) -> None:
     show_mask_preview(
         mri_data,
         raw_mask=raw_mask,
-        refined_mask=refined_mask,
+        cleaned_mask=cleaned_mask,
+        filled_mask=filled_mask,
         brain_extracted=st.session_state.get("brain_extracted"),
         mesh=st.session_state.get("brain_mesh"),
         mask_meta=mask_meta,
@@ -275,13 +295,17 @@ def show_3d_mode(mri_data: MRIData) -> None:
     )
 
     if create_clicked:
-        if warnings:
-            st.warning("Mask quality warning: mesh may be inaccurate.")
+        if debug_only_mask or not reliable_for_3d:
+            st.warning("Reliable skull stripping tool is not available. Install SynthStrip or HD-BET to generate brain-only 3D mesh.")
+            return
+        if quality_warnings:
+            st.warning("Mask quality warning: mesh may be inaccurate. Fix the overlay before generating 3D.")
+            return
 
         try:
             with st.spinner("Building brain-only surface mesh..."):
                 mesh = cached_brain_mesh(
-                    refined_mask,
+                    filled_mask,
                     mri_data.spacing,
                     int(downsample_factor),
                     int(step_size),
@@ -302,7 +326,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
     mesh = st.session_state.get("brain_mesh")
     mesh_info = st.session_state.get("mesh_info", {})
     if mesh is None:
-        st.info("Mask preview is ready. Click Generate 3D mesh to run marching cubes on refined_brain_mask only.")
+        st.info("Mask preview is ready. Click Generate 3D mesh to run marching cubes on filled_brain_mask only.")
         return
 
     left, right = st.columns([1, 2])
@@ -311,13 +335,15 @@ def show_3d_mode(mri_data: MRIData) -> None:
         st.write(f"Mask method: `{mask_meta.get('method', 'Unknown')}`")
         st.write(f"Threshold: `{mask_meta.get('threshold', 'Unknown')}`")
         st.write(f"Raw mask voxels: `{mask_meta.get('raw_voxels', 'Unknown')}`")
-        st.write(f"Refined mask voxels: `{mask_meta.get('voxels', 'Unknown')}`")
+        st.write(f"Cleaned mask voxels: `{mask_meta.get('cleaned_voxels', 'Unknown')}`")
+        st.write(f"Filled mask voxels: `{mask_meta.get('voxels', 'Unknown')}`")
         st.write(f"Mesh vertices: `{len(mesh.vertices)}`")
         st.write(f"Mesh faces: `{len(mesh.faces)}`")
         for mesh_warning in mesh.quality_warnings or []:
             st.warning(mesh_warning)
         st.write(f"brain_mask.nii.gz: `{mesh_info.get('mask_path', '')}`")
         st.write(f"refined_brain_mask.nii.gz: `{mesh_info.get('refined_mask_path', '')}`")
+        st.write(f"filled_brain_mask.nii.gz: `{mesh_info.get('filled_mask_path', '')}`")
         st.write(f"brain_extracted.nii.gz: `{mesh_info.get('brain_path', '')}`")
         st.write(f"brain_mesh.stl: `{mesh_info.get('mesh_path', '')}`")
         add_download_button("Export STL", mesh_info.get("mesh_path"))
@@ -407,7 +433,8 @@ def cached_brain_mesh(
 def show_mask_preview(
     mri_data: MRIData,
     raw_mask: np.ndarray | None,
-    refined_mask: np.ndarray,
+    cleaned_mask: np.ndarray | None,
+    filled_mask: np.ndarray,
     brain_extracted: np.ndarray | None,
     mesh: BrainMesh | None,
     mask_meta: dict,
@@ -420,7 +447,8 @@ def show_mask_preview(
     normalized = normalize_intensity(mri_data.volume)
     image = apply_window(slice_from_plane(normalized, plane, slice_index), 0.5, 0.6)
     raw_slice = slice_from_plane(raw_mask.astype(np.float32), plane, slice_index) if raw_mask is not None else None
-    refined_slice = slice_from_plane(refined_mask.astype(np.float32), plane, slice_index)
+    cleaned_slice = slice_from_plane(cleaned_mask.astype(np.float32), plane, slice_index) if cleaned_mask is not None else None
+    filled_slice = slice_from_plane(filled_mask.astype(np.float32), plane, slice_index)
     extracted_image = None
     if brain_extracted is not None:
         extracted_normalized = normalize_intensity(brain_extracted)
@@ -431,9 +459,11 @@ def show_mask_preview(
         st.subheader("Brain mask preview")
         st.write(f"Method: `{mask_meta.get('method', 'Unknown')}`")
         st.write(f"Raw voxels: `{mask_meta.get('raw_voxels', int(np.count_nonzero(raw_mask)) if raw_mask is not None else 'Unknown')}`")
-        st.write(f"Refined voxels: `{mask_meta.get('voxels', int(np.count_nonzero(refined_mask)))}`")
+        st.write(f"Cleaned voxels: `{mask_meta.get('cleaned_voxels', int(np.count_nonzero(cleaned_mask)) if cleaned_mask is not None else 'Unknown')}`")
+        st.write(f"Filled voxels: `{mask_meta.get('voxels', int(np.count_nonzero(filled_mask)))}`")
         st.write(f"Raw mask: `{MASK_PATH}`")
-        st.write(f"Refined mask: `{REFINED_MASK_PATH}`")
+        st.write(f"Cleaned mask: `{REFINED_MASK_PATH}`")
+        st.write(f"Filled mask: `{FILLED_MASK_PATH}`")
         st.write(f"Extracted brain: `{BRAIN_PATH}`")
     with right:
         if preview_mode == "Mesh" and mesh is not None:
@@ -446,8 +476,9 @@ def show_mask_preview(
             st.pyplot(
                 draw_mask_preview(
                     image,
-                    raw_slice=raw_slice if preview_mode in {"Raw mask", "Raw + refined"} else None,
-                    refined_slice=refined_slice if preview_mode in {"Refined mask", "Raw + refined"} else None,
+                    raw_slice=raw_slice if preview_mode in {"Raw mask", "Raw + cleaned + filled"} else None,
+                    cleaned_slice=cleaned_slice if preview_mode in {"Cleaned mask", "Raw + cleaned + filled"} else None,
+                    filled_slice=filled_slice if preview_mode in {"Filled mask", "Raw + cleaned + filled"} else None,
                     opacity=opacity,
                 ),
                 clear_figure=True,
@@ -457,7 +488,8 @@ def show_mask_preview(
 def draw_mask_preview(
     image: np.ndarray,
     raw_slice: np.ndarray | None = None,
-    refined_slice: np.ndarray | None = None,
+    cleaned_slice: np.ndarray | None = None,
+    filled_slice: np.ndarray | None = None,
     opacity: float = 0.35,
 ):
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -465,9 +497,12 @@ def draw_mask_preview(
     if raw_slice is not None:
         raw_overlay = np.ma.masked_where(raw_slice <= 0, raw_slice)
         ax.imshow(raw_overlay, cmap="winter", alpha=max(0.05, float(opacity) * 0.75), vmin=0, vmax=1)
-    if refined_slice is not None:
-        refined_overlay = np.ma.masked_where(refined_slice <= 0, refined_slice)
-        ax.imshow(refined_overlay, cmap="autumn", alpha=float(opacity), vmin=0, vmax=1)
+    if cleaned_slice is not None:
+        cleaned_overlay = np.ma.masked_where(cleaned_slice <= 0, cleaned_slice)
+        ax.imshow(cleaned_overlay, cmap="spring", alpha=max(0.05, float(opacity) * 0.75), vmin=0, vmax=1)
+    if filled_slice is not None:
+        filled_overlay = np.ma.masked_where(filled_slice <= 0, filled_slice)
+        ax.imshow(filled_overlay, cmap="autumn", alpha=float(opacity), vmin=0, vmax=1)
     ax.axis("off")
     fig.tight_layout()
     return fig
@@ -515,12 +550,16 @@ def ensure_brain_mask(mri_data: MRIData) -> np.ndarray:
 def clear_mesh_state() -> None:
     for key in (
         "raw_brain_mask",
+        "cleaned_brain_mask",
+        "filled_brain_mask",
         "refined_brain_mask",
         "brain_mask",
         "mask_meta",
         "brain_mesh",
         "mesh_info",
         "skull_strip_warnings",
+        "reliable_for_3d",
+        "debug_only_mask",
         "brain_extracted",
     ):
         st.session_state.pop(key, None)

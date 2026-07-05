@@ -24,7 +24,7 @@ class BrainMesh:
 
 
 def build_brain_mesh_from_mask(
-    refined_mask: np.ndarray,
+    filled_brain_mask: np.ndarray,
     spacing: tuple[float, float, float] | None = None,
     gaussian_sigma: float = 1.0,
     level: float = 0.5,
@@ -35,20 +35,20 @@ def build_brain_mesh_from_mask(
     smoothing_iterations: int = 1,
 ) -> BrainMesh:
     """
-    Build a brain surface mesh from a refined brain mask only.
+    Build a brain surface mesh from a filled brain surface mask only.
     Do not call this with the original MRI volume or a raw mask.
     """
-    if refined_mask.ndim != 3:
-        raise ValueError(f"Refined brain mask must be 3D, got shape {refined_mask.shape}.")
+    if filled_brain_mask.ndim != 3:
+        raise ValueError(f"Filled brain mask must be 3D, got shape {filled_brain_mask.shape}.")
 
     spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
-    factor = max(1, int(downsample_factor), int(math.ceil(max(refined_mask.shape) / MAX_MESH_AXIS)))
+    factor = max(1, int(downsample_factor), int(math.ceil(max(filled_brain_mask.shape) / MAX_MESH_AXIS)))
     step = max(1, int(step_size))
     last_error: Exception | None = None
 
     for attempt in range(5):
         try:
-            mesh_mask = prepare_mesh_mask(refined_mask, factor, gaussian_sigma)
+            mesh_mask = prepare_mesh_mask(filled_brain_mask, factor)
             mesh_spacing = tuple(float(value) * factor for value in spacing)
             LOGGER.info(
                 "marching_cubes mask_shape=%s factor=%s step_size=%s voxels=%s",
@@ -113,18 +113,12 @@ def build_brain_mesh(
 def prepare_mesh_mask(brain_mask: np.ndarray, factor: int, gaussian_sigma: float = 1.0) -> np.ndarray:
     mesh_mask = brain_mask[::factor, ::factor, ::factor].astype(bool)
     if np.count_nonzero(mesh_mask) == 0:
-        raise ValueError("Brain mask is empty. Lower the threshold or check the input volume.")
+        raise ValueError("Filled brain surface mask is empty. Regenerate the filled mask.")
     mesh_mask = ndi.binary_fill_holes(mesh_mask)
     mesh_mask = ndi.binary_closing(mesh_mask, iterations=1)
     if np.count_nonzero(mesh_mask) == 0:
-        raise ValueError("Brain mask became empty after cleanup.")
-    sigma = max(0.0, float(gaussian_sigma))
-    if sigma <= 0:
-        return mesh_mask.astype(np.float32)
-    smooth_mask = ndi.gaussian_filter(mesh_mask.astype(np.float32), sigma=sigma)
-    if float(smooth_mask.max()) < 0.5:
-        raise ValueError("Smoothed mask is below marching-cubes level 0.5. Reduce mesh mask gaussian sigma.")
-    return smooth_mask.astype(np.float32)
+        raise ValueError("Filled brain surface mask became empty after cleanup.")
+    return mesh_mask.astype(np.uint8)
 
 
 def remove_degenerate_faces(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:

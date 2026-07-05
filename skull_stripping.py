@@ -9,7 +9,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage import measure, morphology
 
-from brain_mask import create_brain_mask, largest_connected_component, refine_brain_mask
+from brain_mask import create_brain_mask, create_filled_brain_surface_mask, largest_connected_component, refine_brain_mask
 from mri_loader import MRIData, load_nifti_mask, save_brain_extracted, save_nifti_mask, save_nifti_volume
 
 
@@ -17,12 +17,16 @@ from mri_loader import MRIData, load_nifti_mask, save_brain_extracted, save_nift
 class SkullStripResult:
     raw_mask: np.ndarray
     refined_mask: np.ndarray
+    filled_mask: np.ndarray
     mask: np.ndarray
     brain_extracted: np.ndarray
     mask_path: Path
     refined_mask_path: Path
+    filled_mask_path: Path
     brain_path: Path
     method_used: str
+    reliable_for_3d: bool
+    debug_only: bool
     metadata: dict
     warnings: list[str]
 
@@ -47,15 +51,16 @@ def run_skull_stripping(
     input_path = output_dir / "input_volume.nii.gz"
     mask_path = output_dir / "brain_mask.nii.gz"
     refined_mask_path = output_dir / "refined_brain_mask.nii.gz"
+    filled_mask_path = output_dir / "filled_brain_mask.nii.gz"
     brain_path = output_dir / "brain_extracted.nii.gz"
     save_nifti_volume(mri_data.volume, mri_data.affine, input_path)
 
     preferred = method.lower()
     attempts: list[str]
     if preferred == "synthstrip":
-        attempts = ["SynthStrip", "HD-BET", "Simple fallback"]
+        attempts = ["SynthStrip", "HD-BET"]
     elif preferred == "hd-bet":
-        attempts = ["HD-BET", "SynthStrip", "Simple fallback"]
+        attempts = ["HD-BET", "SynthStrip"]
     else:
         attempts = ["Simple fallback"]
 
@@ -63,11 +68,30 @@ def run_skull_stripping(
     for attempt in attempts:
         try:
             if attempt == "SynthStrip":
-                mask = run_synthstrip(input_path, brain_path, mask_path, synthstrip_command)
-                metadata = {"method": "SynthStrip", "command": synthstrip_command}
+                tool_mask_path = output_dir / "brain_mask_synthstrip.nii.gz"
+                tool_brain_path = output_dir / "brain_extracted_synthstrip.nii.gz"
+                mask = run_synthstrip(input_path, tool_brain_path, tool_mask_path, synthstrip_command)
+                metadata = {
+                    "method": "SynthStrip",
+                    "command": synthstrip_command,
+                    "tool_mask_path": str(tool_mask_path),
+                    "tool_brain_path": str(tool_brain_path),
+                    "reliable_for_3d": True,
+                    "debug_only": False,
+                }
             elif attempt == "HD-BET":
-                mask = run_hdbet(input_path, brain_path, mask_path, hdbet_command, hdbet_device)
-                metadata = {"method": "HD-BET", "command": hdbet_command, "device": hdbet_device}
+                tool_mask_path = output_dir / "brain_mask_hdbet.nii.gz"
+                tool_brain_path = output_dir / "brain_extracted_hdbet.nii.gz"
+                mask = run_hdbet(input_path, tool_brain_path, tool_mask_path, hdbet_command, hdbet_device)
+                metadata = {
+                    "method": "HD-BET",
+                    "command": hdbet_command,
+                    "device": hdbet_device,
+                    "tool_mask_path": str(tool_mask_path),
+                    "tool_brain_path": str(tool_brain_path),
+                    "reliable_for_3d": True,
+                    "debug_only": False,
+                }
             else:
                 mask, metadata = create_brain_mask(
                     mri_data.volume,
@@ -78,7 +102,12 @@ def run_skull_stripping(
                 )
                 mask_path = save_nifti_mask(mask, mri_data.affine, mask_path)
                 brain_path = save_brain_extracted(mri_data.volume, mask, mri_data.affine, brain_path)
-                metadata = {**metadata, "method": "Simple fallback"}
+                metadata = {
+                    **metadata,
+                    "method": "Simple fallback debug only",
+                    "reliable_for_3d": False,
+                    "debug_only": True,
+                }
 
             raw_mask = clean_external_mask(mask)
             refined_mask, refine_metadata = refine_brain_mask(
@@ -89,24 +118,37 @@ def run_skull_stripping(
                 min_object_size=remove_small_objects_threshold,
                 gaussian_sigma=mask_smoothing_sigma,
             )
+            filled_mask, filled_metadata = create_filled_brain_surface_mask(
+                refined_mask,
+                hole_area_threshold=max(int(remove_small_holes_threshold), 12000),
+                closing_radius=max(int(closing_radius), 4),
+                min_object_size=int(remove_small_objects_threshold),
+            )
             mask_path = save_nifti_mask(raw_mask, mri_data.affine, mask_path)
             refined_mask_path = save_nifti_mask(refined_mask, mri_data.affine, refined_mask_path)
-            brain_path = save_brain_extracted(mri_data.volume, refined_mask, mri_data.affine, brain_path)
-            quality_warnings = validate_brain_mask(refined_mask, mri_data.volume.shape)
+            filled_mask_path = save_nifti_mask(filled_mask, mri_data.affine, filled_mask_path)
+            brain_path = save_brain_extracted(mri_data.volume, filled_mask, mri_data.affine, brain_path)
+            quality_warnings = validate_brain_mask(filled_mask, mri_data.volume.shape)
             return SkullStripResult(
                 raw_mask=raw_mask,
                 refined_mask=refined_mask,
-                mask=refined_mask,
-                brain_extracted=mri_data.volume * refined_mask.astype(np.float32),
+                filled_mask=filled_mask,
+                mask=filled_mask,
+                brain_extracted=mri_data.volume * filled_mask.astype(np.float32),
                 mask_path=mask_path,
                 refined_mask_path=refined_mask_path,
+                filled_mask_path=filled_mask_path,
                 brain_path=brain_path,
                 method_used=attempt,
+                reliable_for_3d=bool(metadata.get("reliable_for_3d", False)),
+                debug_only=bool(metadata.get("debug_only", False)),
                 metadata={
                     **metadata,
                     **refine_metadata,
+                    **filled_metadata,
                     "raw_voxels": int(np.count_nonzero(raw_mask)),
-                    "voxels": int(np.count_nonzero(refined_mask)),
+                    "cleaned_voxels": int(np.count_nonzero(refined_mask)),
+                    "voxels": int(np.count_nonzero(filled_mask)),
                     "quality_warnings": quality_warnings,
                 },
                 warnings=warnings + quality_warnings,
@@ -114,7 +156,10 @@ def run_skull_stripping(
         except Exception as exc:
             warnings.append(f"{attempt} unavailable/failed: {exc}")
 
-    raise RuntimeError("; ".join(warnings) or "Skull stripping failed.")
+    raise RuntimeError(
+        "Reliable skull stripping tool is not available. Install SynthStrip or HD-BET to generate brain-only 3D mesh. "
+        + ("; ".join(warnings) if warnings else "Skull stripping failed.")
+    )
 
 
 def run_synthstrip(input_path: Path, brain_path: Path, mask_path: Path, command: str) -> np.ndarray:

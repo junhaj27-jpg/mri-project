@@ -34,7 +34,8 @@ def create_viewer_report(info: dict, slice_index: int, roi: dict | None = None, 
         rows.extend(
             [
                 ["Raw brain mask", str(mesh_info.get("mask_path", ""))],
-                ["Refined brain mask", str(mesh_info.get("refined_mask_path", ""))],
+                ["Cleaned brain mask", str(mesh_info.get("refined_mask_path", ""))],
+                ["Filled brain mask", str(mesh_info.get("filled_mask_path", ""))],
                 ["Brain mesh", str(mesh_info.get("mesh_path", ""))],
             ]
         )
