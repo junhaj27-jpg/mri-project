@@ -19,8 +19,9 @@ class MRIData:
     source_label: str
 
 
-def load_dicom(paths_or_folder) -> MRIData:
-    volume, info = load_dicom_volume(paths_or_folder)
+def load_dicom(paths_or_folder, series_key: str | None = None) -> MRIData:
+    paths_or_folder = normalize_single_path(paths_or_folder, "dicom_dir")
+    volume, info = load_dicom_volume(paths_or_folder, series_key=series_key)
     row_spacing, col_spacing = parse_pixel_spacing(info.get("PixelSpacing", [1.0, 1.0]))
     slice_spacing = float(info.get("SliceSpacing") or info.get("SpacingBetweenSlices") or info.get("SliceThickness") or 1.0)
     spacing = (slice_spacing, row_spacing, col_spacing)
@@ -36,6 +37,7 @@ def load_dicom(paths_or_folder) -> MRIData:
 
 
 def load_nifti(path: str | Path) -> MRIData:
+    path = normalize_single_path(path, "nifti_path")
     nifti = nib.load(str(path))
     canonical = nib.as_closest_canonical(nifti)
     data = canonical.get_fdata(dtype=np.float32)
@@ -99,3 +101,13 @@ def parse_pixel_spacing(value) -> tuple[float, float]:
         return float(value[0]), float(value[1])
     except Exception:
         return 1.0, 1.0
+
+
+def normalize_single_path(value, name: str) -> Path:
+    if isinstance(value, (tuple, list)):
+        if len(value) == 1:
+            value = value[0]
+        else:
+            raise TypeError(f"{name} must be a single path, got {type(value).__name__} with {len(value)} items.")
+    path = Path(value)
+    return path

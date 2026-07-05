@@ -95,12 +95,14 @@ def series_sort_key(item: dict) -> tuple[int, int, str, str, str]:
     return (priority, -file_count, item.get("study_date", ""), item.get("series_number", ""), item["description"])
 
 
-def load_dicom_volume(paths_or_folder: list[Path] | str | Path) -> tuple[np.ndarray, dict]:
-    if isinstance(paths_or_folder, list):
-        paths = [Path(path) for path in paths_or_folder]
-    else:
-        series = discover_dicom_series(paths_or_folder)
+def load_dicom_volume(paths_or_folder: str | Path, series_key: str | None = None) -> tuple[np.ndarray, dict]:
+    folder = normalize_folder(paths_or_folder)
+    series = discover_dicom_series(folder)
+    if series_key is None:
         paths = series[0]["paths"] if series else []
+    else:
+        selected = next((item for item in series if str(item.get("key")) == str(series_key)), None)
+        paths = selected["paths"] if selected else []
     if not paths:
         raise FileNotFoundError("No readable DICOM files found.")
 

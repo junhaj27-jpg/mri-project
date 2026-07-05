@@ -49,7 +49,13 @@ def main() -> None:
             key=f"main_view_mode_{default_mode}",
         )
 
-        mri_data = load_input(source_mode)
+        try:
+            mri_data = load_input(source_mode)
+        except Exception as exc:
+            log_exception("Failed to load MRI input", exc)
+            st.error("Failed to load MRI input.")
+            st.exception(exc)
+            st.stop()
         if mri_data is None:
             st.info("Load a DICOM series or upload a NIfTI file to begin.")
             return
@@ -82,9 +88,12 @@ def load_input(source_mode: str) -> MRIData | None:
                 with st.spinner("Loading NIfTI volume..."):
                     st.session_state["loaded_mri"] = cached_load_nifti(str(upload_path))
                     st.session_state["loaded_path"] = str(upload_path)
+                    st.session_state["nifti_path"] = str(upload_path)
             return st.session_state.get("loaded_mri")
 
         folder_path = st.text_input("DICOM data folder", value=str(DEFAULT_DATA_DIR))
+        folder_path = str(Path(folder_path))
+        st.session_state["dicom_dir"] = folder_path
         scan_clicked = st.button("Scan series", type="primary")
 
     if scan_clicked or "series" not in st.session_state:
@@ -109,7 +118,7 @@ def load_input(source_mode: str) -> MRIData | None:
 
     if load_clicked or st.session_state.get("loaded_key") != selected["key"]:
         with st.spinner("Loading DICOM volume..."):
-            st.session_state["loaded_mri"] = cached_load_dicom(tuple(str(path) for path in selected["paths"]))
+            st.session_state["loaded_mri"] = cached_load_dicom(folder_path, str(selected["key"]))
             st.session_state["loaded_key"] = selected["key"]
             clear_mesh_state()
     return st.session_state.get("loaded_mri")
@@ -121,8 +130,13 @@ def cached_discover_dicom_series(folder_path: str) -> list[dict]:
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
-def cached_load_dicom(paths: tuple[str, ...]) -> MRIData:
-    return load_dicom(paths)
+def cached_load_dicom(dicom_dir: str, series_key: str) -> MRIData:
+    dicom_dir = str(Path(dicom_dir))
+    series = discover_dicom_series(dicom_dir)
+    for item in series:
+        if str(item.get("key")) == str(series_key):
+            return load_dicom(str(dicom_dir), series_key=str(series_key))
+    raise FileNotFoundError(f"DICOM series not found: {series_key}")
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
