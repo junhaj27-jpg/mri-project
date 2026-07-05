@@ -9,10 +9,6 @@ def find_bright_candidate_mask(
     percentile: float = 95.0,
     min_area_px: int = 80,
 ) -> np.ndarray:
-    """Find bright candidate regions on a single MRI slice.
-
-    This is a simple visualization helper, not a tumor detection model.
-    """
     finite = np.nan_to_num(image.astype(np.float32), copy=False)
     active = finite > 0
     if not np.any(active):
@@ -42,4 +38,3 @@ def calculate_mask_area_mm2(mask: np.ndarray, pixel_spacing: list[float] | tuple
     except Exception:
         row_spacing, col_spacing = 1.0, 1.0
     return float(mask.sum() * row_spacing * col_spacing)
-

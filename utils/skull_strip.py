@@ -5,11 +5,6 @@ from skimage import filters, measure, morphology
 
 
 def brain_only_slice(image: np.ndarray, erode_pixels: int = 4) -> np.ndarray:
-    """Return a display-only brain-masked MRI slice.
-
-    This is a lightweight visual skull-removal approximation, not a clinical
-    segmentation algorithm.
-    """
     mask = estimate_brain_mask(image, erode_pixels=erode_pixels)
     result = np.zeros_like(image, dtype=np.float32)
     result[mask] = image[mask]
@@ -51,4 +46,3 @@ def keep_component_near_center(mask: np.ndarray) -> np.ndarray:
             best_score = score
             best_label = region.label
     return labels == best_label
-

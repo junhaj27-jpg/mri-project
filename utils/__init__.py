@@ -1,2 +1,2 @@
-"""Utility modules for the AIDLC-MRI Streamlit MVP."""
+"""Helper utilities for the MRI project."""
 

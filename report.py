@@ -10,54 +10,38 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table
 
 REPORT_DIR = Path("outputs/reports")
 DISCLAIMER = (
-    "This viewer is not for diagnosis. Candidate regions are only visual aids. "
+    "Viewer only. Not for diagnosis. This portfolio/MVP tool provides visual aids only. "
     "Final medical decisions must follow a clinician's interpretation."
 )
 
 
-def create_viewer_report(
-    info: dict,
-    slice_index: int,
-    brain_only: bool,
-    tumor_enabled: bool = False,
-    tumor_area_mm2: float = 0.0,
-    roi: dict | None = None,
-    roi_slices: int | None = None,
-    roi_area_mm2: float | None = None,
-    roi_volume_mm3: float | None = None,
-    roi_volume_ml: float | None = None,
-) -> Path:
+def create_viewer_report(info: dict, slice_index: int, roi: dict | None = None, mesh_info: dict | None = None) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = REPORT_DIR / f"brain_mri_viewer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
-    styles = getSampleStyleSheet()
     rows = [
         ["StudyDate", str(info.get("StudyDate", "Unknown"))],
         ["SeriesDescription", str(info.get("SeriesDescription", "Unknown"))],
         ["Plane", str(info.get("Plane", "Unknown"))],
         ["Slice index", str(slice_index)],
-        ["Brain-only view", "On" if brain_only else "Off"],
         ["PixelSpacing", str(info.get("PixelSpacing", "Unknown"))],
         ["SliceThickness", str(info.get("SliceThickness", "Unknown"))],
-        ["SpacingBetweenSlices", str(info.get("SpacingBetweenSlices", "Unknown"))],
-        ["Slice spacing used", str(info.get("SliceSpacing", "Unknown"))],
         ["Volume shape", str(info.get("Shape", "Unknown"))],
-        ["Candidate overlay", "On" if tumor_enabled else "Off"],
-        ["Candidate area", f"{tumor_area_mm2:.2f} mm2"],
     ]
     if roi is not None:
+        rows.append(["ROI", f"x={roi['x']}, y={roi['y']}, width={roi['width']}, height={roi['height']}"])
+    if mesh_info:
         rows.extend(
             [
-                ["ROI", f"x={roi['x']}, y={roi['y']}, width={roi['width']}, height={roi['height']}"],
-                ["ROI slices", str(roi_slices or 1)],
-                ["ROI area", f"{float(roi_area_mm2 or 0.0):.2f} mm2"],
-                ["ROI volume", f"{float(roi_volume_mm3 or 0.0):.2f} mm3"],
-                ["ROI volume ml", f"{float(roi_volume_ml or 0.0):.4f} ml"],
+                ["Raw brain mask", str(mesh_info.get("mask_path", ""))],
+                ["Refined brain mask", str(mesh_info.get("refined_mask_path", ""))],
+                ["Brain mesh", str(mesh_info.get("mesh_path", ""))],
             ]
         )
 
+    styles = getSampleStyleSheet()
     story = [
-        Paragraph("Brain MRI Viewer Report", styles["Title"]),
+        Paragraph("AIDLC-MRI Viewer Report", styles["Title"]),
         Spacer(1, 12),
         Table(rows, colWidths=[130, 340]),
         Spacer(1, 16),

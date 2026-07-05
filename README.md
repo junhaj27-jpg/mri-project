@@ -1,39 +1,56 @@
-# AIDLC-MRI 2D Viewer
+# Brain MRI Viewer
 
-DICOM MRI volume을 불러와 기본 화면에서 axial 2D slice를 grayscale로 보여주는 Streamlit MVP입니다.
+`mri2` 폴더에 들어 있는 병원 CD export 형태의 DICOM MRI를 Streamlit에서
+확인하는 간단한 뷰어입니다.
 
-## 핵심 기능
+## 현재 데이터 위치
 
-- DICOM 폴더 경로 입력
-- `.dcm` 파일 재귀 탐색
-- `PixelData`가 있는 DICOM만 로딩
-- `InstanceNumber` 기준 정렬, 없으면 `ImagePositionPatient`와 파일명 fallback
-- `pixel_array`를 numpy 3D volume으로 변환
-- 기본 화면에서 `volume[z]` axial slice 표시
-- `matplotlib.imshow(cmap="gray")` 기반 2D grayscale 표시
-- Window Level / Window Width 적용
-- scatter, mesh, surface plot 사용 안 함
-- ROI 입력: `x, y, width, height`
-- `PixelSpacing` 기반 ROI 면적 계산
-- `SliceThickness` 기반 단일 slice 추정 부피 계산
-- PDF report 생성
-- PatientID 화면 비표시
+기본 데이터 경로는 아래로 설정되어 있습니다.
 
-## Advanced 기능
+```text
+C:\Users\user\Desktop\mri2\mri-project-main\data
+```
 
-- 표시용 뇌만 보기
-- 밝기 기반 종양 의심 후보 표시
+앱 왼쪽 입력칸에서 다른 폴더로 바꿀 수도 있습니다.
 
-이 기능들은 진단이나 자동 판독이 아니라 화면 확인을 돕는 보조 기능입니다.
+## 기능
+
+- `mri2` 폴더 아래의 확장자 없는 DICOM 파일까지 검색
+- DICOM 시리즈 목록 표시
+- 선택한 시리즈를 3D volume으로 로드
+- axial slice slider
+- window level / window width 조절
+- 표시용 뇌 영역 마스킹
+- 밝은 후보 영역 contour 표시
+- PDF 리포트 생성
+- 화면에 PatientID를 표시하지 않음
 
 ## 실행
 
 ```powershell
-pip install -r requirements.txt
-streamlit run app.py
+.\.venv\Scripts\streamlit.exe run app.py
+```
+
+패키지를 다시 설치해야 할 때:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+## Docker
+
+```powershell
+docker build -t brain-mri-viewer .
+docker run --rm -p 8501:8501 brain-mri-viewer
+```
+
+Docker에서 로컬 데이터를 쓰려면 볼륨으로 연결합니다.
+
+```powershell
+docker run --rm -p 8501:8501 -v C:\Users\user\Desktop\mri2\mri-project-main\data:/data -e MRI_DATA_DIR=/data brain-mri-viewer
 ```
 
 ## 주의
 
-진단 목적의 프로그램이 아닙니다. MRI 이미지를 확인하기 위한 보조 뷰어이며, 최종 의학적 판단은 반드시 의료진 판독을 따라야 합니다.
-
+진단용 프로그램이 아닙니다. 두개골 제거와 후보 영역 표시는 시각 확인을 돕는
+간단한 처리이며 의료용 segmentation 또는 자동 판독이 아닙니다.
