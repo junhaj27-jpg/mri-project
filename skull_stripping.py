@@ -45,6 +45,7 @@ def get_skullstrip_status() -> dict[str, bool]:
         r".venv\Scripts\hd-bet.exe": (venv_scripts / "hd-bet.exe").exists(),
         r".venv\Scripts\HD_BET.exe": (venv_scripts / "HD_BET.exe").exists(),
         "python -m HD_BET": module_exists("HD_BET"),
+        "python -m HD_BET.entry_point": module_exists("HD_BET.entry_point"),
     }
 
 
@@ -248,8 +249,11 @@ def run_hdbet(
             )
             continue
         try:
+            hdbet_args = ["-i", str(input_path), "-o", str(output_no_ext), "-device", device, "--save_bet_mask"]
+            if device == "cpu":
+                hdbet_args.append("--disable_tta")
             result = subprocess.run(
-                cmd + ["-i", str(input_path), "-o", str(output_no_ext), "-device", device, "-mode", "fast"],
+                cmd + hdbet_args,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -316,6 +320,12 @@ def hdbet_command_candidates(command: str | None = None) -> list[dict]:
         {
             "label": "python -m HD_BET",
             "cmd": [sys.executable, "-m", "HD_BET"],
+            "resolved": True,
+            "error": "",
+        },
+        {
+            "label": "python -m HD_BET.entry_point",
+            "cmd": [sys.executable, "-m", "HD_BET.entry_point"],
             "resolved": True,
             "error": "",
         },
