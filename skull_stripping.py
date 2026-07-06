@@ -49,6 +49,19 @@ def get_skullstrip_status() -> dict[str, bool]:
     }
 
 
+def has_reliable_skullstrip_tool(status: dict[str, bool] | None = None) -> bool:
+    status = status or get_skullstrip_status()
+    if status.get("mri_synthstrip"):
+        return True
+    # Windows venv HD-BET launchers are detectable but often fail at runtime with
+    # native DLL/accelerator errors. Treat PATH-installed HD-BET as reliable.
+    return bool(status.get("hd-bet") or status.get("HD_BET"))
+
+
+def skullstrip_unavailable_message() -> str:
+    return "Brain-only 3D mesh requires SynthStrip or HD-BET. Install one of them first."
+
+
 def get_torch_cuda_status() -> dict[str, object]:
     try:
         import torch
@@ -346,14 +359,13 @@ def hdbet_command_candidates(command: str | None = None) -> list[dict]:
     candidates = [
         command_candidate_from_which("hd-bet"),
         command_candidate_from_which("HD_BET"),
+        command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
         {
             "label": r".venv\Scripts\python.exe -m HD_BET.entry_point",
             "cmd": [str(venv_python), "-m", "HD_BET.entry_point"],
             "resolved": venv_python.exists(),
             "error": "" if venv_python.exists() else f"File not found: {venv_python}",
         },
-        command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
-        command_candidate_from_path(r".venv\Scripts\HD_BET.exe", venv_scripts / "HD_BET.exe"),
     ]
     custom = str(command or "").strip()
     if custom and custom.lower() not in {"hd-bet", "hd_bet"} and custom not in {str(item["cmd"][0]) for item in candidates if item["cmd"]}:
