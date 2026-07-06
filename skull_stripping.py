@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,78 @@ def get_skullstrip_status() -> dict[str, bool]:
         r".venv\Scripts\HD_BET.exe": (venv_scripts / "HD_BET.exe").exists(),
         r".venv\Scripts\python.exe -m HD_BET.entry_point": module_exists("HD_BET.entry_point", venv_python),
     }
+
+
+def get_hdbet_debug_info(output_dir: str | Path = "outputs") -> dict[str, object]:
+    output_dir = Path(output_dir)
+    venv_scripts = project_venv_scripts_dir()
+    venv_python = project_venv_python()
+    local_hdbet = venv_scripts / "hd-bet.exe"
+    local_hdbet_caps = venv_scripts / "HD_BET.exe"
+    brain_output = output_dir / "brain_extracted_hdbet.nii.gz"
+    mask_candidates = sorted(
+        {
+            *output_dir.glob("*mask*.nii.gz"),
+            *output_dir.glob("*bet*.nii.gz"),
+            *output_dir.glob("*hdbet*.nii.gz"),
+        },
+        key=lambda path: path.name.lower(),
+    )
+    pip_show = run_probe([str(venv_python), "-m", "pip", "show", "hd-bet"]) if venv_python.exists() else probe_not_found(str(venv_python))
+    import_probe = run_probe([str(venv_python), "-c", "import HD_BET; print('import HD_BET ok')"]) if venv_python.exists() else probe_not_found(str(venv_python))
+    candidates = hdbet_command_candidates(None)
+    executable_found = any(bool(item.get("resolved")) for item in candidates)
+    output_ready = brain_output.exists() and any(path.exists() for path in mask_candidates)
+    if output_ready:
+        status = "HD-BET ready"
+        reason = "Existing HD-BET brain_extracted and mask candidate files were found."
+    elif executable_found:
+        status = "HD-BET found but not validated"
+        reason = "A command or local executable was found, but no successful output was detected."
+    else:
+        status = "HD-BET not found"
+        reason = "No HD-BET command candidate was found."
+    return {
+        "status": status,
+        "reason": reason,
+        "sys_executable": sys.executable,
+        "cwd": os.getcwd(),
+        "venv_path": str(Path(__file__).resolve().parent / ".venv"),
+        "venv_python": str(venv_python),
+        "which_hd_bet": shutil.which("hd-bet"),
+        "which_HD_BET": shutil.which("HD_BET"),
+        "local_hd_bet_exists": local_hdbet.exists(),
+        "local_HD_BET_exists": local_hdbet_caps.exists(),
+        "pip_show_hd_bet": pip_show,
+        "import_HD_BET": import_probe,
+        "brain_extracted_hdbet_exists": brain_output.exists(),
+        "brain_extracted_hdbet_path": str(brain_output),
+        "mask_candidates": [str(path) for path in mask_candidates],
+        "command_candidates": candidates,
+        "windows_native_note": "HD-BET is installed but crashed on Windows native runtime. Try WSL2 Ubuntu, Docker, or SynthStrip.",
+    }
+
+
+def run_probe(cmd: list[str], timeout: int = 30) -> dict[str, object]:
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return {
+            "command": " ".join(cmd),
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    except Exception as exc:
+        return {
+            "command": " ".join(cmd),
+            "returncode": None,
+            "stdout": "",
+            "stderr": repr(exc),
+        }
+
+
+def probe_not_found(path: str) -> dict[str, object]:
+    return {"command": path, "returncode": None, "stdout": "", "stderr": f"File not found: {path}"}
 
 
 def has_reliable_skullstrip_tool(status: dict[str, bool] | None = None) -> bool:
@@ -312,14 +385,16 @@ def run_hdbet(
                 )
                 break
             except subprocess.CalledProcessError as exc:
+                stderr_text = exc.stderr or ""
+                stdout_text = exc.stdout or ""
                 attempts.append(
                     {
                         "label": f"{label} ({run_device})",
                         "command": " ".join(cmd + hdbet_args),
-                        "status": "failed",
+                        "status": classify_hdbet_failure(exc.returncode, stdout_text, stderr_text),
                         "returncode": exc.returncode,
-                        "stdout": exc.stdout or "",
-                        "stderr": exc.stderr or "",
+                        "stdout": stdout_text,
+                        "stderr": stderr_text,
                     }
                 )
             except Exception as exc:
@@ -407,6 +482,17 @@ def find_hdbet_mask(brain_path: Path, mask_path: Path) -> Path | None:
     if preferred:
         return sorted(preferred, key=lambda path: path.stat().st_mtime, reverse=True)[0]
     return None
+
+
+def classify_hdbet_failure(returncode: int | None, stdout: str, stderr: str) -> str:
+    text = f"{stdout}\n{stderr}"
+    if returncode == 3221225786:
+        return "HD-BET installed but crashed on Windows native runtime"
+    if "Output file must end with .nii.gz" in text:
+        return "HD-BET installed but command arguments are invalid"
+    if returncode is None:
+        return "failed"
+    return "failed"
 
 
 def command_candidate_from_which(command: str) -> dict:

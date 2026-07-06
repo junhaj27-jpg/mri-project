@@ -11,10 +11,11 @@ import streamlit as st
 
 from brain_mask import create_brain_mask
 from mesh_builder import BrainMesh, build_brain_intensity_mesh_from_volume, build_brain_mesh_from_mask, export_stl
-from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, save_nifti_mask
+from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_nifti_mask
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER, create_viewer_report
 from skull_stripping import (
+    get_hdbet_debug_info,
     get_skullstrip_status,
     get_torch_cuda_status,
     has_reliable_skullstrip_tool,
@@ -195,13 +196,17 @@ def show_2d_mode(mri_data: MRIData) -> None:
 
 def show_3d_mode(mri_data: MRIData) -> None:
     skullstrip_status = get_skullstrip_status()
+    hdbet_debug = get_hdbet_debug_info(OUTPUT_DIR)
     cuda_status = get_torch_cuda_status()
     reliable_tool_available = has_reliable_skullstrip_tool(skullstrip_status)
+    hdbet_ready = hdbet_debug.get("status") == "HD-BET ready"
+    effective_tool_available = reliable_tool_available or hdbet_ready
     with st.sidebar:
         st.subheader("Brain-only segmentation")
         method = st.selectbox("Skull stripping method", ["SynthStrip recommended", "HD-BET", "Simple fallback debug only"], index=0)
         method_key = "SynthStrip" if method.startswith("SynthStrip") else ("HD-BET" if method == "HD-BET" else "Simple fallback")
-        show_skullstrip_status(skullstrip_status, method)
+        show_skullstrip_status(skullstrip_status, method, hdbet_ready=hdbet_ready)
+        show_hdbet_debug_summary(hdbet_debug)
         synthstrip_command = st.text_input("SynthStrip command", value="mri_synthstrip")
         hdbet_command = st.text_input("HD-BET command", value="hd-bet")
         show_cuda_status(cuda_status)
@@ -231,14 +236,16 @@ def show_3d_mode(mri_data: MRIData) -> None:
         smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 1)
         mesh_opacity = st.slider("Mesh opacity", 0.15, 1.0, 0.86, 0.05)
         show_wireframe = st.checkbox("Show wireframe", value=False)
-        skullstrip_run_disabled = not reliable_tool_available and not method.startswith("Simple fallback")
+        skullstrip_run_disabled = not effective_tool_available and not method.startswith("Simple fallback")
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary", disabled=skullstrip_run_disabled)
-        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not reliable_tool_available)
+        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not effective_tool_available)
 
     st.subheader("3D brain-only mesh")
-    if not reliable_tool_available:
+    if not effective_tool_available:
         st.warning(skullstrip_unavailable_message())
         show_install_help()
+    elif hdbet_ready:
+        st.success("HD-BET: ready")
     if method.startswith("Simple fallback"):
         st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
 
@@ -248,13 +255,13 @@ def show_3d_mode(mri_data: MRIData) -> None:
             "Generate refined mask",
             type="primary",
             use_container_width=True,
-            disabled=not reliable_tool_available and not method.startswith("Simple fallback"),
+            disabled=not effective_tool_available and not method.startswith("Simple fallback"),
         )
     with cols[1]:
         main_create_clicked = st.button(
             "Generate final brain-only 3D mesh",
             use_container_width=True,
-            disabled=method.startswith("Simple fallback") or not reliable_tool_available,
+            disabled=method.startswith("Simple fallback") or not effective_tool_available,
         )
     with cols[2]:
         if st.button("Use default fast settings", use_container_width=True):
@@ -282,27 +289,31 @@ def show_3d_mode(mri_data: MRIData) -> None:
 
     if preview_clicked:
         try:
-            with st.spinner("Creating brain mask from the full MRI volume..."):
-                result = cached_skull_stripping(
-                    mri_data.volume,
-                    mri_data.affine,
-                    mri_data.spacing,
-                    mri_data.info,
-                    mri_data.source_type,
-                    mri_data.source_label,
-                    method_key,
-                    str(OUTPUT_DIR),
-                    synthstrip_command,
-                    hdbet_command,
-                    hdbet_device,
-                    float(threshold_scale),
-                    int(peel_iterations),
-                    bool(fill_holes),
-                    int(closing_radius),
-                    int(remove_small_holes_threshold),
-                    int(remove_small_objects_threshold),
-                    float(mask_smoothing_sigma),
-                )
+            if hdbet_ready and not reliable_tool_available and not method.startswith("Simple fallback"):
+                result = load_existing_hdbet_result(mri_data, hdbet_debug)
+                st.info("Loaded existing HD-BET output from outputs/.")
+            else:
+                with st.spinner("Creating brain mask from the full MRI volume..."):
+                    result = cached_skull_stripping(
+                        mri_data.volume,
+                        mri_data.affine,
+                        mri_data.spacing,
+                        mri_data.info,
+                        mri_data.source_type,
+                        mri_data.source_label,
+                        method_key,
+                        str(OUTPUT_DIR),
+                        synthstrip_command,
+                        hdbet_command,
+                        hdbet_device,
+                        float(threshold_scale),
+                        int(peel_iterations),
+                        bool(fill_holes),
+                        int(closing_radius),
+                        int(remove_small_holes_threshold),
+                        int(remove_small_objects_threshold),
+                        float(mask_smoothing_sigma),
+                    )
             st.session_state["raw_brain_mask"] = result.raw_mask
             st.session_state["cleaned_brain_mask"] = result.refined_mask
             st.session_state["filled_brain_mask"] = result.filled_mask
@@ -351,6 +362,34 @@ def show_3d_mode(mri_data: MRIData) -> None:
             st.warning(warning)
     if debug_only_mask:
         st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
+
+    if mask is None and create_clicked and hdbet_ready and not reliable_tool_available:
+        result = load_existing_hdbet_result(mri_data, hdbet_debug)
+        st.session_state["raw_brain_mask"] = result.raw_mask
+        st.session_state["cleaned_brain_mask"] = result.refined_mask
+        st.session_state["filled_brain_mask"] = result.filled_mask
+        st.session_state["refined_brain_mask"] = result.refined_mask
+        st.session_state["brain_mask"] = result.filled_mask
+        st.session_state["mask_meta"] = result.metadata
+        st.session_state["skull_strip_warnings"] = result.warnings
+        st.session_state["reliable_for_3d"] = result.reliable_for_3d
+        st.session_state["debug_only_mask"] = result.debug_only
+        st.session_state["brain_extracted"] = result.brain_extracted
+        st.session_state["mesh_info"] = {
+            "mask_path": result.mask_path,
+            "refined_mask_path": result.refined_mask_path,
+            "filled_mask_path": result.filled_mask_path,
+            "brain_path": result.brain_path,
+        }
+        raw_mask = result.raw_mask
+        cleaned_mask = result.refined_mask
+        filled_mask = result.filled_mask
+        mask = filled_mask
+        mask_meta = result.metadata
+        mesh_info = st.session_state["mesh_info"]
+        reliable_for_3d = True
+        debug_only_mask = False
+        st.info("Loaded existing HD-BET output from outputs/.")
 
     if mask is None:
         st.info("First create and inspect the brain_mask overlay. Then create the 3D mesh from that mask.")
@@ -514,6 +553,61 @@ def cached_skull_stripping(
         remove_small_holes_threshold=remove_small_holes_threshold,
         remove_small_objects_threshold=remove_small_objects_threshold,
         mask_smoothing_sigma=mask_smoothing_sigma,
+    )
+
+
+def load_existing_hdbet_result(mri_data: MRIData, debug_info: dict):
+    from skull_stripping import SkullStripResult
+
+    output_dir = OUTPUT_DIR
+    raw_path = output_dir / "brain_mask.nii.gz"
+    refined_path = output_dir / "refined_brain_mask.nii.gz"
+    filled_path = output_dir / "filled_brain_mask.nii.gz"
+    brain_path = output_dir / "brain_extracted.nii.gz"
+    if not filled_path.exists():
+        mask_candidates = [Path(path) for path in debug_info.get("mask_candidates", [])]
+        if not mask_candidates:
+            raise FileNotFoundError("No existing HD-BET mask candidate found.")
+        filled_mask = load_nifti_mask(mask_candidates[0])
+        raw_mask = filled_mask
+        refined_mask = filled_mask
+    else:
+        raw_mask = load_nifti_mask(raw_path) if raw_path.exists() else load_nifti_mask(filled_path)
+        refined_mask = load_nifti_mask(refined_path) if refined_path.exists() else load_nifti_mask(filled_path)
+        filled_mask = load_nifti_mask(filled_path)
+
+    if brain_path.exists():
+        brain_extracted = load_nifti(str(brain_path)).volume
+    else:
+        brain_extracted = mri_data.volume * filled_mask.astype(np.float32)
+
+    metadata = {
+        "method": "HD-BET",
+        "reliable_for_3d": True,
+        "debug_only": False,
+        "tool_mask_path": str(raw_path),
+        "tool_brain_path": str(brain_path),
+        "raw_voxels": int(np.count_nonzero(raw_mask)),
+        "cleaned_voxels": int(np.count_nonzero(refined_mask)),
+        "voxels": int(np.count_nonzero(filled_mask)),
+        "quality_warnings": [],
+        "loaded_existing_output": True,
+    }
+    return SkullStripResult(
+        raw_mask=raw_mask,
+        refined_mask=refined_mask,
+        filled_mask=filled_mask,
+        mask=filled_mask,
+        brain_extracted=brain_extracted,
+        mask_path=raw_path,
+        refined_mask_path=refined_path,
+        filled_mask_path=filled_path,
+        brain_path=brain_path,
+        method_used="HD-BET",
+        reliable_for_3d=True,
+        debug_only=False,
+        metadata=metadata,
+        warnings=[],
     )
 
 
@@ -716,16 +810,66 @@ def mesh_wireframe_lines(vertices: np.ndarray, faces: np.ndarray, max_edges: int
     return x_lines, y_lines, z_lines
 
 
-def show_skullstrip_status(status: dict[str, bool], selected_method: str) -> None:
+def show_skullstrip_status(status: dict[str, bool], selected_method: str, hdbet_ready: bool = False) -> None:
     st.caption("Skull stripping tools")
     for command, installed in status.items():
         label = "installed" if installed else "not found"
         st.write(f"{command}: `{label}`")
-    final_enabled = has_reliable_skullstrip_tool(status) and not selected_method.startswith("Simple fallback")
+    final_enabled = (has_reliable_skullstrip_tool(status) or hdbet_ready) and not selected_method.startswith("Simple fallback")
     st.write(f"Selected method: `{selected_method}`")
     st.write(f"Final 3D mesh: `{'available' if final_enabled else 'disabled'}`")
     if not final_enabled and any(status.values()):
         st.caption("Windows native HD-BET was detected but is not treated as reliable for final 3D in this app.")
+
+
+def show_hdbet_debug_summary(info: dict[str, object]) -> None:
+    status = str(info.get("status", "unknown"))
+    st.write(f"HD-BET: `{status}`")
+    st.caption(str(info.get("reason", "")))
+    if status != "HD-BET ready" and (
+        info.get("local_hd_bet_exists") or info.get("which_hd_bet") or info.get("which_HD_BET")
+    ):
+        st.warning("HD-BET found but failed validation. Check the debug log below.")
+    with st.expander("HD-BET detection/debug", expanded=status != "HD-BET ready"):
+        st.write(f"sys.executable: `{info.get('sys_executable')}`")
+        st.write(f"current working directory: `{info.get('cwd')}`")
+        st.write(f"venv path: `{info.get('venv_path')}`")
+        st.write(f"venv python: `{info.get('venv_python')}`")
+        st.write(f"shutil.which('hd-bet'): `{info.get('which_hd_bet')}`")
+        st.write(f"shutil.which('HD_BET'): `{info.get('which_HD_BET')}`")
+        st.write(f".venv\\Scripts\\hd-bet.exe exists: `{info.get('local_hd_bet_exists')}`")
+        st.write(f".venv\\Scripts\\HD_BET.exe exists: `{info.get('local_HD_BET_exists')}`")
+        st.write(f"outputs/brain_extracted_hdbet.nii.gz exists: `{info.get('brain_extracted_hdbet_exists')}`")
+        st.write("Mask candidates:")
+        st.json(info.get("mask_candidates", []))
+        st.write("HD-BET command candidates:")
+        st.json(
+            [
+                {"label": item.get("label"), "resolved": item.get("resolved"), "cmd": item.get("cmd"), "error": item.get("error")}
+                for item in info.get("command_candidates", [])
+            ]
+        )
+        st.write("pip show hd-bet")
+        show_probe(info.get("pip_show_hd_bet", {}))
+        st.write("import HD_BET")
+        show_probe(info.get("import_HD_BET", {}))
+        st.warning(str(info.get("windows_native_note", "")))
+
+
+def show_probe(probe: object) -> None:
+    if not isinstance(probe, dict):
+        st.write(probe)
+        return
+    st.code(str(probe.get("command", "")), language="powershell")
+    st.write(f"returncode: `{probe.get('returncode')}`")
+    stdout = str(probe.get("stdout") or "").strip()
+    stderr = str(probe.get("stderr") or "").strip()
+    if stdout:
+        st.caption("stdout")
+        st.code(stdout[-4000:])
+    if stderr:
+        st.caption("stderr")
+        st.code(stderr[-4000:])
 
 
 def show_cuda_status(status: dict[str, object]) -> None:
