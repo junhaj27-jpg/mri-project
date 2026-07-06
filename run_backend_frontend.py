@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend_server import run
+from backend.server import run
 
 
 if __name__ == "__main__":

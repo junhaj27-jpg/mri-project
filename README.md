@@ -49,6 +49,8 @@ http://127.0.0.1:8000/three-d
 http://127.0.0.1:8000/ai
 ```
 
+See [COMMANDS.md](COMMANDS.md) for a compact command reference.
+
 ## Streamlit App
 
 The original Streamlit MVP is still available:
@@ -131,7 +133,8 @@ Availability depends on the selected processing path and installed skull-strippi
 
 ```text
 app.py                    Streamlit MVP
-backend_server.py         Local backend/frontend HTTP server
+backend/server.py         Local backend/frontend HTTP server
+backend_server.py         Compatibility wrapper for older run commands
 run_backend_frontend.py   Starts the local web app server
 mri_loader.py             DICOM/NIfTI loading
 preprocessing.py          Normalization and slice helpers
