@@ -64,12 +64,26 @@ class BackendHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             if path == "/":
                 self.send_static(FRONTEND_DIR / "index.html")
+            elif path == "/viewer":
+                self.send_static(FRONTEND_DIR / "viewer.html")
+            elif path == "/review":
+                self.send_static(FRONTEND_DIR / "viewer.html")
+            elif path == "/three-d":
+                self.send_static(FRONTEND_DIR / "three_d.html")
             elif path.startswith("/assets/"):
                 self.send_static(FRONTEND_DIR / path.removeprefix("/"))
+            elif path.startswith("/static/"):
+                self.send_static(FRONTEND_DIR / path.removeprefix("/"))
+            elif path == "/health":
+                self.send_json({"status": "ok", "project": "aidlc-mri"})
+            elif path == "/api/project-summary":
+                self.send_json(api_project_summary())
             elif path == "/api/status":
                 self.send_json(api_status())
             elif path == "/api/series":
                 self.send_json(api_series(query))
+            elif path == "/api/studies":
+                self.send_json(api_series(query)["series"])
             elif path == "/api/load":
                 self.send_json(api_load(query))
             elif path == "/api/slice":
@@ -129,6 +143,30 @@ def api_status() -> dict:
         "mask_available": MASK_PATH.exists(),
         "mesh_available": MESH_PATH.exists(),
         "disclaimer": DISCLAIMER,
+    }
+
+
+def api_project_summary() -> dict:
+    mri_data = get_loaded_mri()
+    return {
+        "project": "AIDLC-MRI",
+        "mode": "private_local_research_viewer",
+        "pages": [
+            {"label": "Dashboard", "url": "/"},
+            {"label": "2D Viewer", "url": "/viewer"},
+            {"label": "3D Viewer", "url": "/three-d"},
+        ],
+        "apis": [
+            "/api/status",
+            "/api/series",
+            "/api/load",
+            "/api/slice",
+            "/api/mesh",
+            "/api/mesh_plot",
+        ],
+        "loaded": mri_data is not None,
+        "shape": tuple(int(value) for value in mri_data.volume.shape) if mri_data else None,
+        "warning": DISCLAIMER,
     }
 
 

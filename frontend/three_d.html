@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI 3D Viewer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/three-d" class="active">3D Viewer</a>
+    </div>
+  </nav>
+</header>
+
+<main class="three-workspace">
+  <section class="three-controls">
+    <span class="badge green">3D Preview</span>
+    <h1>Stable brain mask surface</h1>
+    <p class="lead">HD-BET brain mask를 백엔드에서 marching cubes로 변환하고, 프론트엔드는 Plotly 3D viewer를 iframe으로 표시합니다.</p>
+
+    <label>DICOM series
+      <select id="seriesSelect"></select>
+    </label>
+    <button class="btn" id="loadButton" type="button">Load volume</button>
+
+    <section class="real-slice-panel">
+      <div class="real-slice-head">
+        <span class="badge green">Preview slice</span>
+        <strong id="seriesText">-</strong>
+      </div>
+      <div class="real-slice-frame">
+        <img id="sliceImage" alt="MRI slice preview">
+      </div>
+      <div class="slice-toolbar">
+        <input id="sliceRange" type="range" min="0" max="255" value="127">
+        <span id="sliceValueLabel">127</span>
+      </div>
+    </section>
+
+    <div class="form-grid compact-grid">
+      <label>Plane
+        <select id="planeSelect">
+          <option value="sagittal">sagittal</option>
+          <option value="axial">axial</option>
+          <option value="coronal">coronal</option>
+        </select>
+      </label>
+      <label>Mask overlay
+        <select id="maskToggle">
+          <option value="1">on</option>
+          <option value="0">off</option>
+        </select>
+      </label>
+      <label>Gaussian sigma
+        <input id="sigmaInput" type="number" min="0.5" max="3" step="0.1" value="1.0">
+      </label>
+      <label>Smoothing iterations
+        <input id="smoothInput" type="number" min="0" max="20" step="1" value="5">
+      </label>
+      <label>Downsample
+        <input id="downsampleInput" type="number" min="1" max="5" step="1" value="2">
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="meshButton" type="button">Generate 3D mesh</button>
+      <a class="btn secondary" href="/viewer">2D Viewer</a>
+    </div>
+
+    <div class="status-list">
+      <div><span>Source</span><strong id="sourceText">-</strong></div>
+      <div><span>Shape</span><strong id="shapeText">-</strong></div>
+      <div><span>Spacing</span><strong id="spacingText">-</strong></div>
+      <div><span>Mesh</span><strong id="meshText">-</strong></div>
+    </div>
+    <p class="notice" id="disclaimer">Viewer only. Not for diagnosis.</p>
+  </section>
+
+  <section class="three-stage">
+    <iframe id="meshFrame" title="3D brain mesh"></iframe>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/three_d.js"></script>
+</body>
+</html>

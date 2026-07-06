@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI 2D Viewer</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/viewer" class="active">2D Viewer</a>
+      <a href="/three-d">3D Viewer</a>
+    </div>
+  </nav>
+</header>
+
+<main class="review-shell">
+  <section class="review-hero">
+    <span class="badge green">2D Review</span>
+    <div>
+      <h1>Brain MRI slice viewer</h1>
+      <p>DICOM volume을 백엔드에서 로드하고, 프론트엔드에서 plane과 slice를 바꾸며 grayscale 단면과 brain mask overlay를 확인합니다.</p>
+    </div>
+  </section>
+
+  <section class="review-workspace two-column">
+    <aside class="review-panel">
+      <div class="panel-scroll">
+        <h2>Volume</h2>
+        <label>DICOM series
+          <select id="seriesSelect"></select>
+        </label>
+        <button class="btn" id="loadButton" type="button">Load volume</button>
+
+        <hr>
+
+        <label>Slice plane
+          <select id="planeSelect">
+            <option value="sagittal">sagittal</option>
+            <option value="axial">axial</option>
+            <option value="coronal">coronal</option>
+          </select>
+        </label>
+        <label>Slice index
+          <input id="sliceRange" type="range" min="0" max="255" value="127">
+        </label>
+        <input id="sliceValue" type="number" min="0" max="255" value="127">
+        <label>Mask overlay
+          <select id="maskToggle">
+            <option value="1">on</option>
+            <option value="0">off</option>
+          </select>
+        </label>
+        <button class="btn secondary" id="refreshSliceButton" type="button">Refresh slice</button>
+
+        <div class="status-list">
+          <div><span>Source</span><strong id="sourceText">-</strong></div>
+          <div><span>Shape</span><strong id="shapeText">-</strong></div>
+          <div><span>Spacing</span><strong id="spacingText">-</strong></div>
+          <div><span>Series</span><strong id="seriesText">-</strong></div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="review-panel main-review-panel">
+      <div class="review-main-head">
+        <div class="review-title">
+          <span class="badge green">Viewer only</span>
+          <h2 id="sliceTitle">Sagittal slice</h2>
+          <p id="disclaimer">Viewer only. Not for diagnosis.</p>
+        </div>
+        <div class="review-actions single">
+          <a class="btn secondary" href="/three-d">Open 3D</a>
+        </div>
+      </div>
+      <div class="clinical-image-stage">
+        <img id="sliceImage" alt="MRI slice">
+      </div>
+    </section>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/viewer.js"></script>
+</body>
+</html>
