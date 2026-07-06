@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AIDLC-MRI</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #202331;
+        --muted: #697183;
+        --line: #d9dee8;
+        --accent: #d94b55;
+        --accent-dark: #b93744;
+        --ok: #1a7f55;
+        --warn-bg: #fff7dd;
+        --warn-ink: #936300;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Arial, "Segoe UI", sans-serif;
+      }
+
+      header {
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 22px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        min-height: calc(100vh - 64px);
+      }
+
+      aside {
+        border-right: 1px solid var(--line);
+        background: var(--panel);
+        padding: 18px;
+        overflow: auto;
+      }
+
+      section {
+        padding: 18px;
+        overflow: auto;
+      }
+
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      input,
+      select,
+      button {
+        width: 100%;
+        font: inherit;
+      }
+
+      input,
+      select {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px 10px;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      input[type="range"] {
+        padding: 0;
+      }
+
+      button {
+        min-height: 40px;
+        margin-top: 12px;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: var(--accent);
+        color: white;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      button.secondary {
+        background: #fff;
+        color: var(--accent-dark);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .tab {
+        background: #fff;
+        color: var(--ink);
+        border-color: var(--line);
+      }
+
+      .tab.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+
+      .notice {
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: var(--warn-bg);
+        color: var(--warn-ink);
+        line-height: 1.5;
+        margin-bottom: 14px;
+      }
+
+      .status {
+        display: grid;
+        gap: 6px;
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .status strong {
+        color: var(--ink);
+      }
+
+      .viewer {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      #sliceImage {
+        display: block;
+        width: 100%;
+        background: #000;
+        border-radius: 4px;
+      }
+
+      iframe {
+        width: 100%;
+        height: 680px;
+        border: 0;
+        background: #fff;
+        border-radius: 4px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .inline {
+        display: grid;
+        grid-template-columns: 1fr 68px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      @media (max-width: 980px) {
+        main,
+        .viewer {
+          grid-template-columns: 1fr;
+        }
+
+        aside {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>AIDLC-MRI</h1>
+      <div id="serverState">Backend 연결 중</div>
+    </header>
+    <main>
+      <aside>
+        <div class="tabs">
+          <button id="tab2d" class="tab active" type="button">2D</button>
+          <button id="tab3d" class="tab" type="button">3D</button>
+        </div>
+
+        <label for="seriesSelect">DICOM series</label>
+        <select id="seriesSelect"></select>
+        <button id="loadButton" type="button">Load volume</button>
+
+        <label for="planeSelect">Slice plane</label>
+        <select id="planeSelect">
+          <option value="sagittal">sagittal</option>
+          <option value="axial">axial</option>
+          <option value="coronal">coronal</option>
+        </select>
+
+        <label for="sliceRange">Slice index</label>
+        <div class="inline">
+          <input id="sliceRange" type="range" min="0" max="255" value="127" />
+          <input id="sliceValue" type="number" min="0" max="255" value="127" />
+        </div>
+
+        <label for="maskToggle">Mask overlay</label>
+        <select id="maskToggle">
+          <option value="1">on</option>
+          <option value="0">off</option>
+        </select>
+
+        <label for="sigmaInput">Mesh gaussian sigma</label>
+        <input id="sigmaInput" type="number" min="0.5" max="3" step="0.1" value="1.0" />
+
+        <label for="smoothInput">Mesh smoothing iterations</label>
+        <input id="smoothInput" type="number" min="0" max="20" step="1" value="5" />
+
+        <label for="downsampleInput">Downsample factor</label>
+        <input id="downsampleInput" type="number" min="1" max="5" step="1" value="2" />
+
+        <button id="meshButton" type="button">Generate 3D mesh</button>
+        <button id="refreshSliceButton" class="secondary" type="button">Refresh slice</button>
+
+        <div class="status">
+          <div>Source: <strong id="sourceText">-</strong></div>
+          <div>Shape: <strong id="shapeText">-</strong></div>
+          <div>Spacing: <strong id="spacingText">-</strong></div>
+          <div>Series: <strong id="seriesText">-</strong></div>
+          <div>Mesh: <strong id="meshText">-</strong></div>
+        </div>
+      </aside>
+
+      <section>
+        <div class="notice" id="disclaimer">
+          Viewer only. Not for diagnosis. This portfolio/MVP tool provides visual aids only.
+        </div>
+
+        <div class="viewer">
+          <div class="panel" id="slicePanel">
+            <h2 id="sliceTitle">Sagittal slice</h2>
+            <img id="sliceImage" alt="MRI slice" />
+          </div>
+
+          <div class="panel" id="meshPanel">
+            <h2>Stable brain mask surface</h2>
+            <iframe id="meshFrame" title="3D brain mesh"></iframe>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        mode: "2d",
+        status: null,
+        series: [],
+      };
+
+      const el = (id) => document.getElementById(id);
+
+      function setBusy(isBusy) {
+        for (const button of document.querySelectorAll("button")) {
+          button.disabled = isBusy;
+        }
+      }
+
+      async function getJson(url) {
+        const response = await fetch(url, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.error) {
+          throw new Error(data.error || response.statusText);
+        }
+        return data;
+      }
+
+      async function refreshStatus() {
+        const data = await getJson("/api/status");
+        state.status = data;
+        el("serverState").textContent = data.loaded ? "Backend ready" : "Backend waiting";
+        el("sourceText").textContent = data.source || "-";
+        el("shapeText").textContent = data.shape ? data.shape.join(" x ") : "-";
+        el("spacingText").textContent = data.spacing ? data.spacing.map((v) => Number(v).toFixed(2)).join(" / ") : "-";
+        el("seriesText").textContent = data.info?.SeriesDescription || data.source_label || "-";
+        el("meshText").textContent = data.mesh_available ? "available" : "not generated";
+        if (data.disclaimer) el("disclaimer").textContent = data.disclaimer;
+        if (data.shape) updateSliceLimit();
+      }
+
+      async function loadSeriesList() {
+        const data = await getJson("/api/series");
+        state.series = data.series || [];
+        el("seriesSelect").innerHTML = "";
+        for (const item of state.series) {
+          const option = document.createElement("option");
+          option.value = item.key;
+          option.textContent = `${item.description || "Series"} | ${item.file_count} files | ${item.shape || ""}`;
+          el("seriesSelect").appendChild(option);
+        }
+      }
+
+      async function loadVolume() {
+        setBusy(true);
+        try {
+          const key = encodeURIComponent(el("seriesSelect").value);
+          await getJson(`/api/load?series_key=${key}`);
+          await refreshStatus();
+          await refreshSlice();
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function updateSliceLimit() {
+        const shape = state.status?.shape;
+        if (!shape) return;
+        const plane = el("planeSelect").value;
+        const length = plane === "sagittal" ? shape[2] : plane === "coronal" ? shape[1] : shape[0];
+        const max = Math.max(0, length - 1);
+        el("sliceRange").max = String(max);
+        el("sliceValue").max = String(max);
+        const current = Math.min(Number(el("sliceRange").value), max);
+        el("sliceRange").value = String(current);
+        el("sliceValue").value = String(current);
+      }
+
+      async function refreshSlice() {
+        updateSliceLimit();
+        const plane = el("planeSelect").value;
+        const index = Number(el("sliceRange").value);
+        const mask = el("maskToggle").value;
+        el("sliceTitle").textContent = `${plane.charAt(0).toUpperCase() + plane.slice(1)} slice`;
+        el("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+      }
+
+      async function generateMesh() {
+        setBusy(true);
+        try {
+          const sigma = encodeURIComponent(el("sigmaInput").value);
+          const smooth = encodeURIComponent(el("smoothInput").value);
+          const downsample = encodeURIComponent(el("downsampleInput").value);
+          const meta = await getJson(`/api/mesh?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1`);
+          el("meshText").textContent = `${meta.vertices} vertices / ${meta.faces} faces`;
+          el("meshFrame").src = `/api/mesh_plot?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
+          state.mode = "3d";
+          updateMode();
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function updateMode() {
+        el("tab2d").classList.toggle("active", state.mode === "2d");
+        el("tab3d").classList.toggle("active", state.mode === "3d");
+        el("slicePanel").classList.toggle("hidden", state.mode !== "2d");
+        el("meshPanel").classList.toggle("hidden", state.mode !== "3d");
+      }
+
+      el("tab2d").addEventListener("click", () => {
+        state.mode = "2d";
+        updateMode();
+      });
+      el("tab3d").addEventListener("click", () => {
+        state.mode = "3d";
+        updateMode();
+      });
+      el("loadButton").addEventListener("click", loadVolume);
+      el("meshButton").addEventListener("click", generateMesh);
+      el("refreshSliceButton").addEventListener("click", refreshSlice);
+      el("planeSelect").addEventListener("change", refreshSlice);
+      el("maskToggle").addEventListener("change", refreshSlice);
+      el("sliceRange").addEventListener("input", () => {
+        el("sliceValue").value = el("sliceRange").value;
+        refreshSlice();
+      });
+      el("sliceValue").addEventListener("change", () => {
+        el("sliceRange").value = el("sliceValue").value;
+        refreshSlice();
+      });
+
+      async function boot() {
+        updateMode();
+        setBusy(true);
+        try {
+          await loadSeriesList();
+          await loadVolume();
+        } catch (error) {
+          el("serverState").textContent = error.message;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
