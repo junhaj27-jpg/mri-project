@@ -44,9 +44,31 @@ def get_skullstrip_status() -> dict[str, bool]:
         "HD_BET": check_command_exists("HD_BET"),
         r".venv\Scripts\hd-bet.exe": (venv_scripts / "hd-bet.exe").exists(),
         r".venv\Scripts\HD_BET.exe": (venv_scripts / "HD_BET.exe").exists(),
-        "python -m HD_BET": module_exists("HD_BET"),
         "python -m HD_BET.entry_point": module_exists("HD_BET.entry_point"),
     }
+
+
+def get_torch_cuda_status() -> dict[str, object]:
+    try:
+        import torch
+
+        available = bool(torch.cuda.is_available())
+        return {
+            "available": available,
+            "torch_version": str(torch.__version__),
+            "cuda_version": str(torch.version.cuda),
+            "device_count": int(torch.cuda.device_count()),
+            "device_name": torch.cuda.get_device_name(0) if available else "",
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "torch_version": "unknown",
+            "cuda_version": "unknown",
+            "device_count": 0,
+            "device_name": "",
+            "error": repr(exc),
+        }
 
 
 def module_exists(module_name: str) -> bool:
@@ -230,7 +252,10 @@ def run_hdbet(
     device: str = "cuda",
 ) -> tuple[np.ndarray, list[dict]]:
     output_no_ext = strip_nii_suffix(brain_path)
-    device = "cuda" if str(device).lower() in {"cuda", "gpu"} else "cpu"
+    requested_device = "cuda" if str(device).lower() in {"cuda", "gpu"} else "cpu"
+    device_candidates = [requested_device]
+    if requested_device == "cuda":
+        device_candidates.append("cpu")
     attempts: list[dict] = []
     for candidate in hdbet_command_candidates(command):
         label = str(candidate["label"])
@@ -248,62 +273,61 @@ def run_hdbet(
                 }
             )
             continue
-        try:
-            hdbet_args = ["-i", str(input_path), "-o", str(brain_path), "-device", device, "--save_bet_mask"]
-            if device == "cpu":
-                hdbet_args.append("--disable_tta")
-            result = subprocess.run(
-                cmd + hdbet_args,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=900,
-            )
-            attempts.append(
-                {
-                    "label": label,
-                    "command": " ".join(cmd),
-                    "status": "succeeded",
-                    "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                }
-            )
+        for run_device in device_candidates:
+            try:
+                hdbet_args = ["-i", str(input_path), "-o", str(brain_path), "-device", run_device, "--save_bet_mask"]
+                if run_device == "cpu":
+                    hdbet_args.append("--disable_tta")
+                result = subprocess.run(
+                    cmd + hdbet_args,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                attempts.append(
+                    {
+                        "label": f"{label} ({run_device})",
+                        "command": " ".join(cmd + hdbet_args),
+                        "status": "succeeded",
+                        "returncode": result.returncode,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    }
+                )
+                break
+            except subprocess.CalledProcessError as exc:
+                attempts.append(
+                    {
+                        "label": f"{label} ({run_device})",
+                        "command": " ".join(cmd + hdbet_args),
+                        "status": "failed",
+                        "returncode": exc.returncode,
+                        "stdout": exc.stdout or "",
+                        "stderr": exc.stderr or "",
+                    }
+                )
+            except Exception as exc:
+                attempts.append(
+                    {
+                        "label": f"{label} ({run_device})",
+                        "command": " ".join(cmd + hdbet_args),
+                        "status": "failed",
+                        "returncode": None,
+                        "stdout": "",
+                        "stderr": repr(exc),
+                    }
+                )
+        if attempts and attempts[-1].get("status") == "succeeded":
             break
-        except subprocess.CalledProcessError as exc:
-            attempts.append(
-                {
-                    "label": label,
-                    "command": " ".join(cmd),
-                    "status": "failed",
-                    "returncode": exc.returncode,
-                    "stdout": exc.stdout or "",
-                    "stderr": exc.stderr or "",
-                }
-            )
-        except Exception as exc:
-            attempts.append(
-                {
-                    "label": label,
-                    "command": " ".join(cmd),
-                    "status": "failed",
-                    "returncode": None,
-                    "stdout": "",
-                    "stderr": repr(exc),
-                }
-            )
     else:
         raise RuntimeError("HD-BET failed with all command candidates:\n" + format_command_attempts(attempts))
 
-    candidates = [
-        mask_path,
-        output_no_ext.with_name(output_no_ext.name + "_mask.nii.gz"),
-        output_no_ext.with_name(output_no_ext.name + "_mask.nii"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return load_nifti_mask(candidate), attempts
-    raise FileNotFoundError("HD-BET did not create a mask file.")
+    mask_candidate = find_hdbet_mask(brain_path, mask_path)
+    if mask_candidate is not None:
+        return load_nifti_mask(mask_candidate), attempts
+    generated = sorted(str(path) for path in brain_path.parent.glob("*.nii.gz"))
+    raise FileNotFoundError("HD-BET did not create a mask file. Generated files: " + "; ".join(generated))
 
 
 def project_venv_scripts_dir() -> Path:
@@ -318,12 +342,6 @@ def hdbet_command_candidates(command: str | None = None) -> list[dict]:
         command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
         command_candidate_from_path(r".venv\Scripts\HD_BET.exe", venv_scripts / "HD_BET.exe"),
         {
-            "label": "python -m HD_BET",
-            "cmd": [sys.executable, "-m", "HD_BET"],
-            "resolved": True,
-            "error": "",
-        },
-        {
             "label": "python -m HD_BET.entry_point",
             "cmd": [sys.executable, "-m", "HD_BET.entry_point"],
             "resolved": True,
@@ -334,6 +352,42 @@ def hdbet_command_candidates(command: str | None = None) -> list[dict]:
     if custom and custom.lower() not in {"hd-bet", "hd_bet"} and custom not in {str(item["cmd"][0]) for item in candidates if item["cmd"]}:
         candidates.insert(0, command_candidate_from_custom(custom))
     return candidates
+
+
+def find_hdbet_mask(brain_path: Path, mask_path: Path) -> Path | None:
+    output_no_ext = strip_nii_suffix(brain_path)
+    explicit_candidates = [
+        mask_path,
+        output_no_ext.with_name(output_no_ext.name + "_bet.nii.gz"),
+        output_no_ext.with_name(output_no_ext.name + "_mask.nii.gz"),
+        output_no_ext.with_name(output_no_ext.name + "_bet_mask.nii.gz"),
+        output_no_ext.with_name(output_no_ext.name + "_bet.nii"),
+        output_no_ext.with_name(output_no_ext.name + "_mask.nii"),
+    ]
+    for candidate in explicit_candidates:
+        if candidate.exists():
+            return candidate
+
+    generated: list[Path] = []
+    for pattern in ("*hdbet*.nii.gz", "*bet*.nii.gz", "*mask*.nii.gz", "*.nii.gz"):
+        generated.extend(brain_path.parent.glob(pattern))
+
+    seen: set[Path] = set()
+    unique = []
+    for path in generated:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(path)
+
+    preferred = [
+        path
+        for path in unique
+        if path != brain_path and any(token in path.name.lower() for token in ("mask", "bet", "hdbet"))
+    ]
+    if preferred:
+        return sorted(preferred, key=lambda path: path.stat().st_mtime, reverse=True)[0]
+    return None
 
 
 def command_candidate_from_which(command: str) -> dict:

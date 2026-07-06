@@ -14,7 +14,7 @@ from mesh_builder import BrainMesh, build_brain_mesh_from_mask, export_stl
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, save_nifti_mask
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER, create_viewer_report
-from skull_stripping import get_skullstrip_status, run_skull_stripping
+from skull_stripping import get_skullstrip_status, get_torch_cuda_status, run_skull_stripping
 
 
 DEFAULT_DATA_DIR = Path(r"C:\Users\user\Desktop\mri2\mri-project-main\data")
@@ -189,6 +189,7 @@ def show_2d_mode(mri_data: MRIData) -> None:
 
 def show_3d_mode(mri_data: MRIData) -> None:
     skullstrip_status = get_skullstrip_status()
+    cuda_status = get_torch_cuda_status()
     reliable_tool_available = any(skullstrip_status.values())
     with st.sidebar:
         st.subheader("Brain-only segmentation")
@@ -197,7 +198,9 @@ def show_3d_mode(mri_data: MRIData) -> None:
         show_skullstrip_status(skullstrip_status, method)
         synthstrip_command = st.text_input("SynthStrip command", value="mri_synthstrip")
         hdbet_command = st.text_input("HD-BET command", value="hd-bet")
-        hdbet_device = st.selectbox("HD-BET device", ["cuda", "cpu"], index=0)
+        show_cuda_status(cuda_status)
+        hdbet_devices = ["cuda", "cpu"] if cuda_status.get("available") else ["cpu"]
+        hdbet_device = st.selectbox("HD-BET device", hdbet_devices, index=0)
         threshold_scale = st.slider("Brain mask threshold", 0.5, 1.5, 1.0, 0.05)
         peel_iterations = st.slider("Skin/skull peel iterations", 0, 10, 5)
         st.subheader("Mask refinement")
@@ -645,6 +648,16 @@ def show_skullstrip_status(status: dict[str, bool], selected_method: str) -> Non
     final_enabled = any(status.values()) and not selected_method.startswith("Simple fallback")
     st.write(f"Selected method: `{selected_method}`")
     st.write(f"Final 3D mesh: `{'available' if final_enabled else 'disabled'}`")
+
+
+def show_cuda_status(status: dict[str, object]) -> None:
+    st.caption("GPU / CUDA")
+    if status.get("available"):
+        st.write(f"CUDA: `available`")
+        st.write(f"GPU: `{status.get('device_name', '')}`")
+    else:
+        st.write("CUDA: `not available`")
+        st.caption(f"Torch: {status.get('torch_version', 'unknown')} / CUDA: {status.get('cuda_version', 'none')}")
 
 
 def show_install_help() -> None:
