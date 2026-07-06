@@ -70,6 +70,12 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_static(FRONTEND_DIR / "viewer.html")
             elif path == "/three-d":
                 self.send_static(FRONTEND_DIR / "three_d.html")
+            elif path == "/studies":
+                self.send_static(FRONTEND_DIR / "studies.html")
+            elif path == "/volume":
+                self.send_static(FRONTEND_DIR / "volume.html")
+            elif path == "/ai":
+                self.send_static(FRONTEND_DIR / "ai.html")
             elif path.startswith("/assets/"):
                 self.send_static(FRONTEND_DIR / path.removeprefix("/"))
             elif path.startswith("/static/"):
@@ -83,7 +89,13 @@ class BackendHandler(BaseHTTPRequestHandler):
             elif path == "/api/series":
                 self.send_json(api_series(query))
             elif path == "/api/studies":
-                self.send_json(api_series(query)["series"])
+                self.send_json(api_studies(query))
+            elif path == "/api/tracking":
+                self.send_json(api_tracking())
+            elif path == "/api/volume-result":
+                self.send_json(api_volume_result())
+            elif path == "/api/ai-results":
+                self.send_json(api_ai_results())
             elif path == "/api/load":
                 self.send_json(api_load(query))
             elif path == "/api/slice":
@@ -153,11 +165,18 @@ def api_project_summary() -> dict:
         "mode": "private_local_research_viewer",
         "pages": [
             {"label": "Dashboard", "url": "/"},
+            {"label": "Studies", "url": "/studies"},
             {"label": "2D Viewer", "url": "/viewer"},
+            {"label": "Volume", "url": "/volume"},
             {"label": "3D Viewer", "url": "/three-d"},
+            {"label": "AI Assist", "url": "/ai"},
         ],
         "apis": [
             "/api/status",
+            "/api/studies",
+            "/api/tracking",
+            "/api/volume-result",
+            "/api/ai-results",
             "/api/series",
             "/api/load",
             "/api/slice",
@@ -175,6 +194,92 @@ def api_series(query: dict[str, list[str]]) -> dict:
     series = discover_dicom_series(str(data_dir))
     STATE["series"] = series
     return {"data_dir": str(data_dir), "series": series}
+
+
+def api_studies(query: dict[str, list[str]]) -> list[dict]:
+    rows = api_series(query)["series"]
+    studies: list[dict] = []
+    for index, item in enumerate(rows, start=1):
+        description = str(item.get("description") or "Unknown series")
+        file_count = int(item.get("file_count") or 0)
+        shape = str(item.get("shape") or "")
+        modality = "MRI" if file_count > 1 else "Reference"
+        section = "Brain MRI" if "BRAIN" in description.upper() or file_count > 20 else "Reference image"
+        studies.append(
+            {
+                "study_label": f"BRAIN_T{index:02d}",
+                "series_key": item.get("key"),
+                "description": description,
+                "file_count": file_count,
+                "shape": shape,
+                "section": section,
+                "modality": modality,
+                "status": "ready" if file_count > 1 else "reference_only",
+                "warning": "Viewer only. Not for diagnosis.",
+            }
+        )
+    return studies
+
+
+def api_tracking() -> dict:
+    base_values = [52.8, 50.6, 48.9, 47.2, 44.8, 42.1, 39.8, 36.5, 35.1, 34.0, 32.7, 31.9, 31.0, 30.6]
+    items = []
+    previous = None
+    for index, value in enumerate(base_values, start=1):
+        change = None if previous is None else round(value - previous, 2)
+        rate = None if previous in (None, 0) else round((value - previous) / previous * 100.0, 2)
+        items.append(
+            {
+                "study_label": f"BRAIN_T{index:02d}",
+                "volume_cm3": value,
+                "previous_volume_cm3": previous,
+                "change_cm3": change,
+                "change_rate_percent": rate,
+                "quality_flag": "baseline_reference" if index == 1 else "research_tracking",
+                "note": "Mock longitudinal value for portfolio visualization.",
+            }
+        )
+        previous = value
+    return {
+        "patient_code": "P001",
+        "body_region": "BRAIN",
+        "items": items,
+        "warning": DISCLAIMER,
+    }
+
+
+def api_volume_result() -> dict:
+    mask_info = mask_volume_info()
+    tracking = api_tracking()
+    latest = tracking["items"][-1]
+    return {
+        "patient_code": "P001",
+        "study_label": latest["study_label"],
+        "mock_tracking_latest_cm3": latest["volume_cm3"],
+        "mask_volume": mask_info,
+        "formula": "voxel_count * spacing_z_mm * spacing_y_mm * spacing_x_mm / 1000",
+        "warning": DISCLAIMER,
+    }
+
+
+def api_ai_results() -> dict:
+    mri_data = get_loaded_mri()
+    mask_info = mask_volume_info()
+    mesh_ready = MESH_PATH.exists()
+    return {
+        "engine": "HD-BET / skull-stripping assisted viewer",
+        "mask_source": "outputs/filled_brain_mask.nii.gz" if MASK_PATH.exists() else "not available",
+        "mesh_source": str(MESH_PATH) if mesh_ready else "not generated",
+        "volume_shape": tuple(int(value) for value in mri_data.volume.shape) if mri_data else None,
+        "mask_volume": mask_info,
+        "checks": [
+            {"label": "Brain mask available", "ok": MASK_PATH.exists()},
+            {"label": "Stable mesh exported", "ok": mesh_ready},
+            {"label": "2D overlay supported", "ok": MASK_PATH.exists()},
+            {"label": "Diagnostic claim blocked", "ok": True},
+        ],
+        "warning": DISCLAIMER,
+    }
 
 
 def api_load(query: dict[str, list[str]]) -> dict:
@@ -289,6 +394,26 @@ def load_matching_mask(mri_data: MRIData) -> np.ndarray:
     if mask.shape != mri_data.volume.shape:
         raise ValueError(f"Brain mask shape mismatch: {mask.shape} vs {mri_data.volume.shape}")
     return mask
+
+
+def mask_volume_info() -> dict:
+    mri_data = get_loaded_mri()
+    if mri_data is None or not MASK_PATH.exists():
+        return {"available": False}
+    try:
+        mask = load_matching_mask(mri_data)
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+    voxel_count = int(np.count_nonzero(mask))
+    voxel_mm3 = float(mri_data.spacing[0] * mri_data.spacing[1] * mri_data.spacing[2])
+    volume_mm3 = voxel_count * voxel_mm3
+    return {
+        "available": True,
+        "voxel_count": voxel_count,
+        "spacing_mm": mri_data.spacing,
+        "volume_mm3": round(volume_mm3, 2),
+        "volume_ml": round(volume_mm3 / 1000.0, 3),
+    }
 
 
 def draw_slice_png(image: np.ndarray, mask_slice: np.ndarray | None = None) -> bytes:

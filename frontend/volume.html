@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI Volume</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/studies">Studies</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/volume" class="active">Volume</a>
+      <a href="/three-d">3D Viewer</a>
+      <a href="/ai">AI Assist</a>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="hero">
+    <div class="card hero-copy">
+      <span class="badge green">Volume Tracking</span>
+      <h1>Brain MRI volume summary</h1>
+      <p>T01 to T14 tracking values are shown with the current brain mask volume summary. Values are for viewer/portfolio demonstration only.</p>
+      <div class="actions">
+        <button class="btn" id="refreshVolumeBtn" type="button">Refresh volume</button>
+        <a class="btn secondary" href="/three-d">Open 3D</a>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Current brain mask</h2>
+      <div class="status-list">
+        <div><span>Voxels</span><strong id="maskVoxelText">-</strong></div>
+        <div><span>mm3</span><strong id="maskMm3Text">-</strong></div>
+        <div><span>ml</span><strong id="maskMlText">-</strong></div>
+        <div><span>Formula</span><strong id="formulaText">-</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Mock longitudinal tracking</h2>
+    <div id="volumeChart" class="bar-chart"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Study</th>
+            <th>Volume cm3</th>
+            <th>Change cm3</th>
+            <th>Change %</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="volumeBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/volume.js"></script>
+</body>
+</html>

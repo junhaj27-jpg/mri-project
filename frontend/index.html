@@ -12,8 +12,11 @@
     <a class="brand" href="/">AIDLC-MRI</a>
     <div class="menu">
       <a href="/" class="active">Dashboard</a>
+      <a href="/studies">Studies</a>
       <a href="/viewer">2D Viewer</a>
+      <a href="/volume">Volume</a>
       <a href="/three-d">3D Viewer</a>
+      <a href="/ai">AI Assist</a>
     </div>
   </nav>
 </header>
@@ -25,7 +28,9 @@
       <h1>Brain MRI 2D/3D Visualization Web Service</h1>
       <p>Local DICOM MRI volume을 백엔드에서 읽고, 프론트엔드에서 2D slice와 brain-only 3D mesh를 확인하는 포트폴리오용 MVP입니다.</p>
       <div class="actions">
+        <a class="btn secondary" href="/studies">Studies 보기</a>
         <a class="btn" href="/viewer">2D Viewer 열기</a>
+        <a class="btn secondary" href="/volume">Volume 보기</a>
         <a class="btn secondary" href="/three-d">3D Viewer 열기</a>
       </div>
       <p class="notice">Viewer only. Not for diagnosis. Final medical decisions must follow a clinician's interpretation.</p>
@@ -48,15 +53,30 @@
   </section>
 
   <section class="grid two">
+    <a class="card feature-card" href="/studies">
+      <span class="badge green">Studies</span>
+      <h2>DICOM Series List</h2>
+      <p>mri2 data 폴더의 DICOM series를 정리해서 study label, file count, shape 기준으로 확인합니다.</p>
+    </a>
     <a class="card feature-card" href="/viewer">
       <span class="badge green">2D Review</span>
       <h2>MRI Slice Viewer</h2>
       <p>Sagittal, axial, coronal plane을 선택하고 slice index를 움직이며 mask overlay를 확인합니다.</p>
     </a>
+    <a class="card feature-card" href="/volume">
+      <span class="badge green">Volume</span>
+      <h2>Tracking Summary</h2>
+      <p>참조 프로젝트처럼 T01~T14 mock tracking graph와 현재 brain mask volume 정보를 함께 표시합니다.</p>
+    </a>
     <a class="card feature-card" href="/three-d">
       <span class="badge green">3D Preview</span>
       <h2>Brain Mask Surface</h2>
       <p>HD-BET 결과 mask를 기반으로 안정적인 brain-only surface mesh를 생성하고 회전/확대합니다.</p>
+    </a>
+    <a class="card feature-card" href="/ai">
+      <span class="badge green">AI Assist</span>
+      <h2>Mask Pipeline Status</h2>
+      <p>HD-BET mask, mesh export, overlay 상태를 연구용 보조 결과로 요약합니다.</p>
     </a>
   </section>
 </main>

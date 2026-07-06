@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI Studies</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/studies" class="active">Studies</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/volume">Volume</a>
+      <a href="/three-d">3D Viewer</a>
+      <a href="/ai">AI Assist</a>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card">
+    <span class="badge green">Studies</span>
+    <h1>DICOM series list</h1>
+    <p>Local DICOM series are organized into study-style rows, similar to the reference project. This viewer shows research/demo metadata only.</p>
+    <div class="actions">
+      <button class="btn" id="refreshStudiesBtn" type="button">Refresh studies</button>
+      <a class="btn secondary" href="/viewer">Open 2D Viewer</a>
+    </div>
+  </section>
+
+  <section class="card table-card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Study</th>
+            <th>Section</th>
+            <th>Description</th>
+            <th>Files</th>
+            <th>Shape</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="studiesBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/studies.js"></script>
+</body>
+</html>

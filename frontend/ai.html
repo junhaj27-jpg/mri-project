@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI AI Assist</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/studies">Studies</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/volume">Volume</a>
+      <a href="/three-d">3D Viewer</a>
+      <a href="/ai" class="active">AI Assist</a>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card">
+    <span class="badge green">AI Assist</span>
+    <h1>Brain mask pipeline status</h1>
+    <p>Skull stripping, mask, mesh, and overlay readiness are summarized here. This is viewer/portfolio support information, not automated diagnosis.</p>
+    <div class="actions">
+      <button class="btn" id="refreshAiBtn" type="button">Refresh status</button>
+      <a class="btn secondary" href="/viewer">Check overlay</a>
+      <a class="btn secondary" href="/three-d">Open 3D</a>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Pipeline checks</h2>
+      <div id="checksList" class="check-list"></div>
+    </div>
+    <div class="card">
+      <h2>Result summary</h2>
+      <div class="status-list">
+        <div><span>Engine</span><strong id="engineText">-</strong></div>
+        <div><span>Mask</span><strong id="maskText">-</strong></div>
+        <div><span>Mesh</span><strong id="meshText">-</strong></div>
+        <div><span>Shape</span><strong id="shapeText">-</strong></div>
+      </div>
+      <p class="notice" id="aiWarning">Viewer only. Not for diagnosis.</p>
+    </div>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/ai.js"></script>
+</body>
+</html>
