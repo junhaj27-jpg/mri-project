@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 from scipy import ndimage as ndi
-from skimage import measure
+from skimage import measure, morphology
 
 LOGGER = logging.getLogger("aidlc_mri.mesh")
 MAX_MESH_AXIS = 128
@@ -21,6 +21,7 @@ class BrainMesh:
     faces: np.ndarray
     spacing: tuple[float, float, float]
     quality_warnings: list[str] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 def build_brain_mesh_from_mask(
@@ -48,14 +49,14 @@ def build_brain_mesh_from_mask(
 
     for attempt in range(5):
         try:
-            mesh_mask = prepare_mesh_mask(filled_brain_mask, factor)
+            mesh_mask = prepare_mesh_mask(filled_brain_mask, factor, gaussian_sigma=gaussian_sigma)
             mesh_spacing = tuple(float(value) * factor for value in spacing)
             LOGGER.info(
                 "marching_cubes mask_shape=%s factor=%s step_size=%s voxels=%s",
                 mesh_mask.shape,
                 factor,
                 step,
-                int(np.count_nonzero(mesh_mask)),
+                int(np.count_nonzero(mesh_mask > 0.5)),
             )
             vertices, faces, _, _ = measure.marching_cubes(
                 mesh_mask,
@@ -74,11 +75,27 @@ def build_brain_mesh_from_mask(
                 continue
             faces = remove_degenerate_faces(vertices, faces)
             vertices, faces = compact_mesh(vertices, faces)
-            vertices, faces = process_mesh_with_trimesh(vertices, faces, decimate_ratio=decimate_ratio)
+            vertices, faces = keep_largest_mesh_component(vertices, faces)
+            vertices, faces = process_mesh_with_trimesh(
+                vertices,
+                faces,
+                decimate_ratio=decimate_ratio,
+                smoothing_iterations=int(smoothing_iterations) if apply_mesh_smoothing else 0,
+            )
             if apply_mesh_smoothing:
                 vertices = smooth_vertices(vertices, faces, int(smoothing_iterations))
             quality_warnings = validate_mesh_quality(vertices, faces, tuple(np.array(mesh_mask.shape) * np.array(mesh_spacing)))
-            return BrainMesh(vertices=vertices, faces=faces, spacing=mesh_spacing, quality_warnings=quality_warnings)
+            metadata = mesh_component_metadata(faces)
+            metadata.update(
+                {
+                    "surface_mode": "Stable brain mask surface recommended",
+                    "gaussian_sigma": float(gaussian_sigma),
+                    "step_size": int(step),
+                    "downsample_factor": int(factor),
+                    "smoothing_iterations": int(smoothing_iterations) if apply_mesh_smoothing else 0,
+                }
+            )
+            return BrainMesh(vertices=vertices, faces=faces, spacing=mesh_spacing, quality_warnings=quality_warnings, metadata=metadata)
         except Exception as exc:
             last_error = exc
             LOGGER.exception("marching_cubes failed with factor=%s step_size=%s", factor, step)
@@ -120,15 +137,15 @@ def build_brain_intensity_mesh_from_volume(
                 raise ValueError("Brain mask is empty.")
             masked_volume = np.asarray(brain_extracted[::factor, ::factor, ::factor], dtype=np.float32).copy()
             masked_volume[~mask] = 0
+            if gaussian_sigma > 0:
+                masked_volume = ndi.gaussian_filter(masked_volume, sigma=float(gaussian_sigma))
+                masked_volume[~mask] = 0
             values = masked_volume[mask]
             values = values[np.isfinite(values)]
             values = values[values > 0]
             if values.size == 0:
                 raise ValueError("Brain extracted volume has no positive intensities inside mask.")
             level = float(np.percentile(values, float(iso_percentile)))
-            if gaussian_sigma > 0:
-                masked_volume = ndi.gaussian_filter(masked_volume, sigma=float(gaussian_sigma))
-                masked_volume[~mask] = 0
             mesh_spacing = tuple(float(value) * factor for value in spacing)
             vertices, faces, _, _ = measure.marching_cubes(
                 masked_volume,
@@ -145,13 +162,40 @@ def build_brain_intensity_mesh_from_volume(
                 continue
             faces = remove_degenerate_faces(vertices, faces)
             vertices, faces = compact_mesh(vertices, faces)
+            raw_component_meta = mesh_component_metadata(faces)
+            if (
+                raw_component_meta.get("components", 0) > 20
+                or float(raw_component_meta.get("largest_component_face_ratio", 1.0)) < 0.70
+            ):
+                raise ValueError(
+                    "Experimental intensity surface is fragmented; use Stable brain mask surface recommended."
+                )
             vertices, faces = keep_largest_mesh_component(vertices, faces)
-            vertices, faces = process_mesh_with_trimesh(vertices, faces, decimate_ratio=None)
+            vertices, faces = process_mesh_with_trimesh(
+                vertices,
+                faces,
+                decimate_ratio=None,
+                smoothing_iterations=int(smoothing_iterations) if apply_mesh_smoothing else 0,
+            )
             if apply_mesh_smoothing:
                 vertices = smooth_vertices(vertices, faces, int(smoothing_iterations))
             quality_warnings = validate_mesh_quality(vertices, faces, tuple(np.array(masked_volume.shape) * np.array(mesh_spacing)))
             quality_warnings.append(f"Intensity iso level percentile={float(iso_percentile):.1f}, level={level:.4g}.")
-            return BrainMesh(vertices=vertices, faces=faces, spacing=mesh_spacing, quality_warnings=quality_warnings)
+            metadata = mesh_component_metadata(faces)
+            metadata.update(
+                {
+                    "surface_mode": "Experimental intensity surface",
+                    "raw_components_before_largest_only": raw_component_meta.get("components", 0),
+                    "raw_largest_component_face_ratio": raw_component_meta.get("largest_component_face_ratio", 1.0),
+                    "gaussian_sigma": float(gaussian_sigma),
+                    "iso_percentile": float(iso_percentile),
+                    "iso_level": float(level),
+                    "step_size": int(step),
+                    "downsample_factor": int(factor),
+                    "smoothing_iterations": int(smoothing_iterations) if apply_mesh_smoothing else 0,
+                }
+            )
+            return BrainMesh(vertices=vertices, faces=faces, spacing=mesh_spacing, quality_warnings=quality_warnings, metadata=metadata)
         except Exception as exc:
             last_error = exc
             LOGGER.exception("intensity marching_cubes failed with factor=%s step_size=%s", factor, step)
@@ -188,9 +232,14 @@ def prepare_mesh_mask(brain_mask: np.ndarray, factor: int, gaussian_sigma: float
     if np.count_nonzero(mesh_mask) == 0:
         raise ValueError("Filled brain surface mask is empty. Regenerate the filled mask.")
     mesh_mask = ndi.binary_fill_holes(mesh_mask)
-    mesh_mask = ndi.binary_closing(mesh_mask, iterations=1)
+    mesh_mask = morphology.remove_small_objects(mesh_mask, min_size=max(64, 10000 // max(1, factor**3)))
+    mesh_mask = morphology.remove_small_holes(mesh_mask, area_threshold=max(64, 10000 // max(1, factor**3)))
+    mesh_mask = morphology.binary_closing(mesh_mask, morphology.ball(2))
+    mesh_mask = ndi.binary_fill_holes(mesh_mask)
     if np.count_nonzero(mesh_mask) == 0:
         raise ValueError("Filled brain surface mask became empty after cleanup.")
+    if gaussian_sigma > 0:
+        return ndi.gaussian_filter(mesh_mask.astype(np.float32), sigma=float(gaussian_sigma))
     return mesh_mask.astype(np.uint8)
 
 
@@ -217,6 +266,7 @@ def process_mesh_with_trimesh(
     vertices: np.ndarray,
     faces: np.ndarray,
     decimate_ratio: float | None = None,
+    smoothing_iterations: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
     try:
         import trimesh  # type: ignore
@@ -224,14 +274,24 @@ def process_mesh_with_trimesh(
         return vertices, faces
 
     try:
-        mesh: Any = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        mesh: Any = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+        components = mesh.split(only_watertight=False)
+        if len(components) > 0:
+            mesh = max(components, key=lambda item: len(item.faces))
         if hasattr(mesh, "remove_duplicate_faces"):
             mesh.remove_duplicate_faces()
         if hasattr(mesh, "remove_degenerate_faces"):
             mesh.remove_degenerate_faces()
+        if hasattr(mesh, "remove_unreferenced_vertices"):
+            mesh.remove_unreferenced_vertices()
         if hasattr(mesh, "fill_holes"):
             mesh.fill_holes()
         mesh.process(validate=True)
+        if smoothing_iterations > 0:
+            try:
+                trimesh.smoothing.filter_laplacian(mesh, iterations=int(smoothing_iterations))
+            except Exception:
+                LOGGER.exception("trimesh laplacian smoothing failed; continuing without it")
         if decimate_ratio is not None and 0.0 < float(decimate_ratio) < 1.0 and len(mesh.faces) > 1000:
             target_faces = max(1000, int(len(mesh.faces) * float(decimate_ratio)))
             if hasattr(mesh, "simplify_quadric_decimation"):
@@ -289,6 +349,46 @@ def count_mesh_components(faces: np.ndarray) -> int:
                         seen[neighbor] = True
                         stack.append(neighbor)
     return components
+
+
+def mesh_component_metadata(faces: np.ndarray) -> dict[str, float | int]:
+    sizes = mesh_component_face_sizes(faces)
+    if not sizes:
+        return {"components": 0, "largest_component_faces": 0, "largest_component_face_ratio": 0.0}
+    largest = max(sizes)
+    total = sum(sizes)
+    return {
+        "components": len(sizes),
+        "largest_component_faces": int(largest),
+        "largest_component_face_ratio": float(largest / total) if total else 0.0,
+    }
+
+
+def mesh_component_face_sizes(faces: np.ndarray) -> list[int]:
+    if len(faces) == 0:
+        return []
+    vertex_to_faces: dict[int, list[int]] = {}
+    for face_index, face in enumerate(faces):
+        for vertex in face:
+            vertex_to_faces.setdefault(int(vertex), []).append(face_index)
+    seen = np.zeros(len(faces), dtype=bool)
+    sizes: list[int] = []
+    for start in range(len(faces)):
+        if seen[start]:
+            continue
+        count = 0
+        stack = [start]
+        seen[start] = True
+        while stack:
+            face_index = stack.pop()
+            count += 1
+            for vertex in faces[face_index]:
+                for neighbor in vertex_to_faces[int(vertex)]:
+                    if not seen[neighbor]:
+                        seen[neighbor] = True
+                        stack.append(neighbor)
+        sizes.append(count)
+    return sizes
 
 
 def keep_largest_mesh_component(vertices: np.ndarray, faces: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

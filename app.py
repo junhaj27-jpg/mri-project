@@ -227,14 +227,20 @@ def show_3d_mode(mri_data: MRIData) -> None:
         mask_smoothing_sigma = st.slider("Gaussian smoothing sigma", 0.0, 3.0, 1.0, 0.1)
         mask_opacity = st.slider("Mask opacity", 0.05, 0.90, 0.35, 0.05)
         st.subheader("Mesh")
-        surface_mode = st.selectbox("Surface mode", ["Brain mask surface", "Brain intensity surface"], index=1)
+        surface_mode = st.selectbox(
+            "Surface mode",
+            ["Stable brain mask surface recommended", "Experimental intensity surface"],
+            index=0,
+        )
         iso_percentile = st.slider("Iso level percentile", 10, 80, 35, step=1)
         downsample_factor = st.slider("Downsample factor", 1, 5, 2)
         step_size = st.slider("Mesh step_size", 1, 4, 1)
-        mesh_mask_gaussian_sigma = st.slider("Mesh mask gaussian sigma", 0.0, 3.0, 0.2, 0.1)
+        mesh_mask_gaussian_sigma = st.slider("Mesh gaussian sigma", 0.5, 3.0, 1.0, 0.1)
         mesh_smoothing_enabled = st.checkbox("Mesh smoothing", value=True)
-        smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 1)
-        mesh_opacity = st.slider("Mesh opacity", 0.15, 1.0, 0.86, 0.05)
+        smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 20, 5)
+        keep_largest_component = st.checkbox("Keep largest mesh component", value=True, disabled=True)
+        remove_small_components = st.checkbox("Remove small components", value=True, disabled=True)
+        mesh_opacity = st.slider("Mesh opacity", 0.15, 1.0, 1.0, 0.05)
         show_wireframe = st.checkbox("Show wireframe", value=False)
         skullstrip_run_disabled = not effective_tool_available and not method.startswith("Simple fallback")
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary", disabled=skullstrip_run_disabled)
@@ -269,8 +275,8 @@ def show_3d_mode(mri_data: MRIData) -> None:
             peel_iterations = 6
             downsample_factor = 2
             step_size = 1
-            smoothing_iterations = 1
-            mesh_mask_gaussian_sigma = 0.2
+            smoothing_iterations = 5
+            mesh_mask_gaussian_sigma = 1.0
             mesh_smoothing_enabled = True
             main_preview_clicked = True
     with cols[3]:
@@ -353,6 +359,11 @@ def show_3d_mode(mri_data: MRIData) -> None:
     mask = filled_mask
     mask_meta = st.session_state.get("mask_meta", {})
     mesh_info = st.session_state.get("mesh_info", {})
+    existing_surface_mode = str(mesh_info.get("surface_mode", ""))
+    if existing_surface_mode and existing_surface_mode != surface_mode:
+        st.session_state.pop("brain_mesh", None)
+        st.session_state["mesh_info"] = {key: value for key, value in mesh_info.items() if key not in {"mesh_path", "surface_mode"}}
+        mesh_info = st.session_state.get("mesh_info", {})
     warnings = st.session_state.get("skull_strip_warnings", [])
     quality_warnings = list(mask_meta.get("quality_warnings", []))
     reliable_for_3d = bool(st.session_state.get("reliable_for_3d", False))
@@ -413,7 +424,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         try:
             with st.spinner("Building debug fallback surface mesh..."):
                 mesh = cached_brain_mesh(
-                    "Brain mask surface",
+                    "Stable brain mask surface recommended",
                     filled_mask,
                     st.session_state.get("brain_extracted"),
                     mri_data.spacing,
@@ -445,18 +456,37 @@ def show_3d_mode(mri_data: MRIData) -> None:
 
         try:
             with st.spinner("Building brain-only surface mesh..."):
-                mesh = cached_brain_mesh(
-                    surface_mode,
-                    filled_mask,
-                    st.session_state.get("brain_extracted"),
-                    mri_data.spacing,
-                    int(downsample_factor),
-                    int(step_size),
-                    int(smoothing_iterations),
-                    float(mesh_mask_gaussian_sigma),
-                    bool(mesh_smoothing_enabled),
-                    float(iso_percentile),
-                )
+                try:
+                    mesh = cached_brain_mesh(
+                        surface_mode,
+                        filled_mask,
+                        st.session_state.get("brain_extracted"),
+                        mri_data.spacing,
+                        int(downsample_factor),
+                        int(step_size),
+                        int(smoothing_iterations),
+                        float(mesh_mask_gaussian_sigma),
+                        bool(mesh_smoothing_enabled),
+                        float(iso_percentile),
+                    )
+                except Exception as intensity_exc:
+                    if surface_mode != "Experimental intensity surface":
+                        raise
+                    st.warning("Experimental intensity surface was unstable. Falling back to stable brain mask surface.")
+                    log_exception("Experimental intensity surface failed; falling back", intensity_exc)
+                    surface_mode = "Stable brain mask surface recommended"
+                    mesh = cached_brain_mesh(
+                        surface_mode,
+                        filled_mask,
+                        st.session_state.get("brain_extracted"),
+                        mri_data.spacing,
+                        int(downsample_factor),
+                        int(step_size),
+                        int(smoothing_iterations),
+                        float(mesh_mask_gaussian_sigma),
+                        bool(mesh_smoothing_enabled),
+                        float(iso_percentile),
+                    )
                 mesh_path = export_stl(mesh, mesh_output_path(mask_meta, surface_mode))
             st.session_state["brain_mesh"] = mesh
             st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path, "surface_mode": surface_mode}
@@ -487,7 +517,13 @@ def show_3d_mode(mri_data: MRIData) -> None:
         st.write(f"Filled mask voxels: `{mask_meta.get('voxels', 'Unknown')}`")
         st.write(f"Mesh vertices: `{len(mesh.vertices)}`")
         st.write(f"Mesh faces: `{len(mesh.faces)}`")
-        st.write(f"Surface mode: `{mesh_info.get('surface_mode', 'Brain mask surface')}`")
+        mesh_meta = mesh.metadata or {}
+        st.write(f"Surface mode: `{mesh_info.get('surface_mode', 'Stable brain mask surface recommended')}`")
+        st.write(f"Mesh components: `{mesh_meta.get('components', 'Unknown')}`")
+        st.write(f"Largest component face ratio: `{mesh_meta.get('largest_component_face_ratio', 'Unknown')}`")
+        st.write(f"Gaussian sigma: `{mesh_meta.get('gaussian_sigma', 'Unknown')}`")
+        st.write(f"Smoothing iterations: `{mesh_meta.get('smoothing_iterations', 'Unknown')}`")
+        st.write(f"Step size: `{mesh_meta.get('step_size', 'Unknown')}`")
         for mesh_warning in mesh.quality_warnings or []:
             st.warning(mesh_warning)
         st.write(f"brain_mask.nii.gz: `{mesh_info.get('mask_path', '')}`")
@@ -624,7 +660,7 @@ def cached_brain_mesh(
     mesh_smoothing_enabled: bool,
     iso_percentile: float,
 ) -> BrainMesh:
-    if surface_mode == "Brain intensity surface":
+    if surface_mode == "Experimental intensity surface":
         if brain_extracted is None:
             raise ValueError("Brain intensity surface requires brain_extracted volume from HD-BET.")
         return build_brain_intensity_mesh_from_volume(
@@ -757,7 +793,7 @@ def mesh_to_figure(mesh: BrainMesh, opacity: float = 0.86, show_wireframe: bool 
             color="lightgray",
             opacity=float(opacity),
             flatshading=False,
-            lighting=dict(ambient=0.45, diffuse=0.85, specular=0.18, roughness=0.65),
+            lighting=dict(ambient=0.5, diffuse=0.8, specular=0.1, roughness=0.6, fresnel=0.1),
         )
     ]
     if show_wireframe:
@@ -941,9 +977,9 @@ def show_command_attempts_text(text: str) -> None:
         st.code(text[-8000:])
 
 
-def mesh_output_path(mask_meta: dict, surface_mode: str = "Brain mask surface") -> Path:
+def mesh_output_path(mask_meta: dict, surface_mode: str = "Stable brain mask surface recommended") -> Path:
     method = str(mask_meta.get("method", "")).lower()
-    mode_suffix = "_intensity" if surface_mode == "Brain intensity surface" else ""
+    mode_suffix = "_intensity" if surface_mode == "Experimental intensity surface" else ""
     if "synthstrip" in method:
         return OUTPUT_DIR / f"brain_mesh_synthstrip{mode_suffix}.stl"
     if "hd-bet" in method:
