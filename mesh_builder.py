@@ -88,6 +88,79 @@ def build_brain_mesh_from_mask(
     raise RuntimeError(f"Brain mesh generation failed after downsample retries: {last_error}") from last_error
 
 
+def build_brain_intensity_mesh_from_volume(
+    brain_extracted: np.ndarray,
+    brain_mask: np.ndarray,
+    spacing: tuple[float, float, float] | None = None,
+    iso_percentile: float = 35.0,
+    gaussian_sigma: float = 0.2,
+    step_size: int = 1,
+    apply_mesh_smoothing: bool = True,
+    downsample_factor: int = 1,
+    smoothing_iterations: int = 1,
+) -> BrainMesh:
+    """
+    Build an intensity iso-surface from skull-stripped brain only.
+    This must not be called with an unmasked head volume.
+    """
+    if brain_extracted.ndim != 3 or brain_mask.ndim != 3:
+        raise ValueError("Brain extracted volume and mask must both be 3D.")
+    if brain_extracted.shape != brain_mask.shape:
+        raise ValueError(f"Volume/mask shape mismatch: {brain_extracted.shape} vs {brain_mask.shape}.")
+
+    spacing = spacing if spacing is not None else (1.0, 1.0, 1.0)
+    factor = max(1, int(downsample_factor), int(math.ceil(max(brain_extracted.shape) / MAX_MESH_AXIS)))
+    step = max(1, int(step_size))
+    last_error: Exception | None = None
+
+    for attempt in range(5):
+        try:
+            mask = brain_mask[::factor, ::factor, ::factor].astype(bool)
+            if np.count_nonzero(mask) == 0:
+                raise ValueError("Brain mask is empty.")
+            masked_volume = np.asarray(brain_extracted[::factor, ::factor, ::factor], dtype=np.float32).copy()
+            masked_volume[~mask] = 0
+            values = masked_volume[mask]
+            values = values[np.isfinite(values)]
+            values = values[values > 0]
+            if values.size == 0:
+                raise ValueError("Brain extracted volume has no positive intensities inside mask.")
+            level = float(np.percentile(values, float(iso_percentile)))
+            if gaussian_sigma > 0:
+                masked_volume = ndi.gaussian_filter(masked_volume, sigma=float(gaussian_sigma))
+                masked_volume[~mask] = 0
+            mesh_spacing = tuple(float(value) * factor for value in spacing)
+            vertices, faces, _, _ = measure.marching_cubes(
+                masked_volume,
+                level=level,
+                spacing=mesh_spacing,
+                step_size=step,
+                allow_degenerate=False,
+            )
+            faces = faces.astype(np.int32)
+            vertices = vertices.astype(np.float32)
+            if len(faces) > MAX_PLOTLY_FACES and attempt < 4:
+                factor += 1
+                step = min(6, step + 1)
+                continue
+            faces = remove_degenerate_faces(vertices, faces)
+            vertices, faces = compact_mesh(vertices, faces)
+            vertices, faces = keep_largest_mesh_component(vertices, faces)
+            vertices, faces = process_mesh_with_trimesh(vertices, faces, decimate_ratio=None)
+            if apply_mesh_smoothing:
+                vertices = smooth_vertices(vertices, faces, int(smoothing_iterations))
+            quality_warnings = validate_mesh_quality(vertices, faces, tuple(np.array(masked_volume.shape) * np.array(mesh_spacing)))
+            quality_warnings.append(f"Intensity iso level percentile={float(iso_percentile):.1f}, level={level:.4g}.")
+            return BrainMesh(vertices=vertices, faces=faces, spacing=mesh_spacing, quality_warnings=quality_warnings)
+        except Exception as exc:
+            last_error = exc
+            LOGGER.exception("intensity marching_cubes failed with factor=%s step_size=%s", factor, step)
+            factor += 1
+            step = min(6, step + 1)
+
+    raise RuntimeError(f"Brain intensity mesh generation failed after downsample retries: {last_error}") from last_error
+
+
 def build_brain_mesh(
     brain_mask: np.ndarray,
     spacing: tuple[float, float, float],
@@ -216,6 +289,37 @@ def count_mesh_components(faces: np.ndarray) -> int:
                         seen[neighbor] = True
                         stack.append(neighbor)
     return components
+
+
+def keep_largest_mesh_component(vertices: np.ndarray, faces: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    if len(faces) == 0:
+        return vertices, faces
+    vertex_to_faces: dict[int, list[int]] = {}
+    for face_index, face in enumerate(faces):
+        for vertex in face:
+            vertex_to_faces.setdefault(int(vertex), []).append(face_index)
+
+    seen = np.zeros(len(faces), dtype=bool)
+    components: list[list[int]] = []
+    for start in range(len(faces)):
+        if seen[start]:
+            continue
+        component: list[int] = []
+        stack = [start]
+        seen[start] = True
+        while stack:
+            face_index = stack.pop()
+            component.append(face_index)
+            for vertex in faces[face_index]:
+                for neighbor in vertex_to_faces[int(vertex)]:
+                    if not seen[neighbor]:
+                        seen[neighbor] = True
+                        stack.append(neighbor)
+        components.append(component)
+    if not components:
+        return vertices, faces
+    largest = max(components, key=len)
+    return compact_mesh(vertices, faces[np.asarray(largest, dtype=np.int32)])
 
 
 def smooth_vertices(vertices: np.ndarray, faces: np.ndarray, iterations: int) -> np.ndarray:

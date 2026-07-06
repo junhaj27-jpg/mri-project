@@ -38,13 +38,14 @@ def check_command_exists(command: str) -> bool:
 
 def get_skullstrip_status() -> dict[str, bool]:
     venv_scripts = project_venv_scripts_dir()
+    venv_python = project_venv_python()
     return {
         "mri_synthstrip": check_command_exists("mri_synthstrip"),
         "hd-bet": check_command_exists("hd-bet"),
         "HD_BET": check_command_exists("HD_BET"),
         r".venv\Scripts\hd-bet.exe": (venv_scripts / "hd-bet.exe").exists(),
         r".venv\Scripts\HD_BET.exe": (venv_scripts / "HD_BET.exe").exists(),
-        "python -m HD_BET.entry_point": module_exists("HD_BET.entry_point"),
+        r".venv\Scripts\python.exe -m HD_BET.entry_point": module_exists("HD_BET.entry_point", venv_python),
     }
 
 
@@ -71,10 +72,11 @@ def get_torch_cuda_status() -> dict[str, object]:
         }
 
 
-def module_exists(module_name: str) -> bool:
+def module_exists(module_name: str, python_executable: Path | None = None) -> bool:
     try:
+        executable = str(python_executable or sys.executable)
         result = subprocess.run(
-            [sys.executable, "-m", module_name, "-h"],
+            [executable, "-m", module_name, "-h"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -334,19 +336,24 @@ def project_venv_scripts_dir() -> Path:
     return Path(__file__).resolve().parent / ".venv" / "Scripts"
 
 
+def project_venv_python() -> Path:
+    return project_venv_scripts_dir() / "python.exe"
+
+
 def hdbet_command_candidates(command: str | None = None) -> list[dict]:
     venv_scripts = project_venv_scripts_dir()
+    venv_python = project_venv_python()
     candidates = [
         command_candidate_from_which("hd-bet"),
         command_candidate_from_which("HD_BET"),
+        {
+            "label": r".venv\Scripts\python.exe -m HD_BET.entry_point",
+            "cmd": [str(venv_python), "-m", "HD_BET.entry_point"],
+            "resolved": venv_python.exists(),
+            "error": "" if venv_python.exists() else f"File not found: {venv_python}",
+        },
         command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
         command_candidate_from_path(r".venv\Scripts\HD_BET.exe", venv_scripts / "HD_BET.exe"),
-        {
-            "label": "python -m HD_BET.entry_point",
-            "cmd": [sys.executable, "-m", "HD_BET.entry_point"],
-            "resolved": True,
-            "error": "",
-        },
     ]
     custom = str(command or "").strip()
     if custom and custom.lower() not in {"hd-bet", "hd_bet"} and custom not in {str(item["cmd"][0]) for item in candidates if item["cmd"]}:

@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from brain_mask import create_brain_mask
-from mesh_builder import BrainMesh, build_brain_mesh_from_mask, export_stl
+from mesh_builder import BrainMesh, build_brain_intensity_mesh_from_volume, build_brain_mesh_from_mask, export_stl
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, save_nifti_mask
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER, create_viewer_report
@@ -216,11 +216,15 @@ def show_3d_mode(mri_data: MRIData) -> None:
         mask_smoothing_sigma = st.slider("Gaussian smoothing sigma", 0.0, 3.0, 1.0, 0.1)
         mask_opacity = st.slider("Mask opacity", 0.05, 0.90, 0.35, 0.05)
         st.subheader("Mesh")
+        surface_mode = st.selectbox("Surface mode", ["Brain mask surface", "Brain intensity surface"], index=1)
+        iso_percentile = st.slider("Iso level percentile", 10, 80, 35, step=1)
         downsample_factor = st.slider("Downsample factor", 1, 5, 2)
-        step_size = st.slider("Mesh step_size", 1, 5, 2)
-        mesh_mask_gaussian_sigma = st.slider("Mesh mask gaussian sigma", 0.0, 3.0, 1.0, 0.1)
+        step_size = st.slider("Mesh step_size", 1, 4, 1)
+        mesh_mask_gaussian_sigma = st.slider("Mesh mask gaussian sigma", 0.0, 3.0, 0.2, 0.1)
         mesh_smoothing_enabled = st.checkbox("Mesh smoothing", value=True)
-        smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 4)
+        smoothing_iterations = st.slider("Mesh smoothing iterations", 0, 10, 1)
+        mesh_opacity = st.slider("Mesh opacity", 0.15, 1.0, 0.86, 0.05)
+        show_wireframe = st.checkbox("Show wireframe", value=False)
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary")
         sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not reliable_tool_available)
 
@@ -245,9 +249,9 @@ def show_3d_mode(mri_data: MRIData) -> None:
             threshold_scale = 1.0
             peel_iterations = 6
             downsample_factor = 2
-            step_size = 2
-            smoothing_iterations = 3
-            mesh_mask_gaussian_sigma = 1.0
+            step_size = 1
+            smoothing_iterations = 1
+            mesh_mask_gaussian_sigma = 0.2
             mesh_smoothing_enabled = True
             main_preview_clicked = True
     with cols[3]:
@@ -361,13 +365,16 @@ def show_3d_mode(mri_data: MRIData) -> None:
         try:
             with st.spinner("Building debug fallback surface mesh..."):
                 mesh = cached_brain_mesh(
+                    "Brain mask surface",
                     filled_mask,
+                    st.session_state.get("brain_extracted"),
                     mri_data.spacing,
                     int(downsample_factor),
                     int(step_size),
                     int(smoothing_iterations),
                     float(mesh_mask_gaussian_sigma),
                     bool(mesh_smoothing_enabled),
+                    float(iso_percentile),
                 )
                 mesh_path = export_stl(mesh, OUTPUT_DIR / "debug_fallback_mesh.stl")
             st.session_state["brain_mesh"] = mesh
@@ -392,17 +399,20 @@ def show_3d_mode(mri_data: MRIData) -> None:
         try:
             with st.spinner("Building brain-only surface mesh..."):
                 mesh = cached_brain_mesh(
+                    surface_mode,
                     filled_mask,
+                    st.session_state.get("brain_extracted"),
                     mri_data.spacing,
                     int(downsample_factor),
                     int(step_size),
                     int(smoothing_iterations),
                     float(mesh_mask_gaussian_sigma),
                     bool(mesh_smoothing_enabled),
+                    float(iso_percentile),
                 )
-                mesh_path = export_stl(mesh, mesh_output_path(mask_meta))
+                mesh_path = export_stl(mesh, mesh_output_path(mask_meta, surface_mode))
             st.session_state["brain_mesh"] = mesh
-            st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path}
+            st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path, "surface_mode": surface_mode}
         except Exception as exc:
             log_exception("3D mesh generation failed", exc)
             st.error("3D rendering failed. Check the log.")
@@ -430,6 +440,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         st.write(f"Filled mask voxels: `{mask_meta.get('voxels', 'Unknown')}`")
         st.write(f"Mesh vertices: `{len(mesh.vertices)}`")
         st.write(f"Mesh faces: `{len(mesh.faces)}`")
+        st.write(f"Surface mode: `{mesh_info.get('surface_mode', 'Brain mask surface')}`")
         for mesh_warning in mesh.quality_warnings or []:
             st.warning(mesh_warning)
         st.write(f"brain_mask.nii.gz: `{mesh_info.get('mask_path', '')}`")
@@ -441,9 +452,9 @@ def show_3d_mode(mri_data: MRIData) -> None:
         st.button("Export GLB", disabled=True, help="GLB export can be enabled later by adding trimesh. STL export is available now.")
 
     with right:
-        st.subheader("Brain-only 3D surface")
+        st.subheader(str(mesh_info.get("surface_mode", "Brain-only 3D surface")))
         try:
-            st.plotly_chart(mesh_to_figure(mesh), use_container_width=True)
+            st.plotly_chart(mesh_to_figure(mesh, opacity=mesh_opacity, show_wireframe=show_wireframe), use_container_width=True)
         except Exception as exc:
             log_exception("Plotly mesh rendering failed", exc)
             st.error("3D rendering failed. Check the log.")
@@ -500,14 +511,31 @@ def cached_skull_stripping(
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def cached_brain_mesh(
+    surface_mode: str,
     mask: np.ndarray,
+    brain_extracted: np.ndarray | None,
     spacing: tuple[float, float, float],
     downsample_factor: int,
     step_size: int,
     smoothing_iterations: int,
     mask_gaussian_sigma: float,
     mesh_smoothing_enabled: bool,
+    iso_percentile: float,
 ) -> BrainMesh:
+    if surface_mode == "Brain intensity surface":
+        if brain_extracted is None:
+            raise ValueError("Brain intensity surface requires brain_extracted volume from HD-BET.")
+        return build_brain_intensity_mesh_from_volume(
+            brain_extracted,
+            mask,
+            spacing=spacing,
+            iso_percentile=float(iso_percentile),
+            gaussian_sigma=mask_gaussian_sigma,
+            step_size=step_size,
+            apply_mesh_smoothing=mesh_smoothing_enabled,
+            downsample_factor=downsample_factor,
+            smoothing_iterations=smoothing_iterations,
+        )
     return build_brain_mesh_from_mask(
         mask,
         spacing=spacing,
@@ -609,28 +637,42 @@ def draw_mask_preview(
     return fig
 
 
-def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
+def mesh_to_figure(mesh: BrainMesh, opacity: float = 0.86, show_wireframe: bool = False) -> go.Figure:
     vertices = mesh.vertices
     faces = mesh.faces
     if len(vertices) == 0 or len(faces) == 0:
         raise ValueError("Mesh is empty.")
     if len(faces) > 250_000:
         raise ValueError(f"Mesh is too large for browser rendering: {len(faces)} faces. Increase downsample or step_size.")
-    fig = go.Figure(
-        data=[
-            go.Mesh3d(
-                x=vertices[:, 2],
-                y=vertices[:, 1],
-                z=vertices[:, 0],
-                i=faces[:, 0],
-                j=faces[:, 1],
-                k=faces[:, 2],
-                color="lightgray",
-                opacity=0.88,
-                flatshading=False,
-                lighting=dict(ambient=0.55, diffuse=0.7, specular=0.15),
+    data = [
+        go.Mesh3d(
+            x=vertices[:, 2],
+            y=vertices[:, 1],
+            z=vertices[:, 0],
+            i=faces[:, 0],
+            j=faces[:, 1],
+            k=faces[:, 2],
+            color="lightgray",
+            opacity=float(opacity),
+            flatshading=False,
+            lighting=dict(ambient=0.45, diffuse=0.85, specular=0.18, roughness=0.65),
+        )
+    ]
+    if show_wireframe:
+        x_lines, y_lines, z_lines = mesh_wireframe_lines(vertices, faces, max_edges=9000)
+        data.append(
+            go.Scatter3d(
+                x=x_lines,
+                y=y_lines,
+                z=z_lines,
+                mode="lines",
+                line=dict(color="rgba(40, 40, 40, 0.22)", width=1),
+                hoverinfo="skip",
+                showlegend=False,
             )
-        ]
+        )
+    fig = go.Figure(
+        data=data
     )
     fig.update_layout(
         height=720,
@@ -638,6 +680,32 @@ def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
         scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y", zaxis_title="z"),
     )
     return fig
+
+
+def mesh_wireframe_lines(vertices: np.ndarray, faces: np.ndarray, max_edges: int = 9000) -> tuple[list[float], list[float], list[float]]:
+    edges: set[tuple[int, int]] = set()
+    stride = max(1, int(len(faces) / max(1, max_edges // 3)))
+    for face in faces[::stride]:
+        a, b, c = [int(value) for value in face]
+        for u, v in ((a, b), (b, c), (c, a)):
+            edges.add((min(u, v), max(u, v)))
+            if len(edges) >= max_edges:
+                break
+        if len(edges) >= max_edges:
+            break
+    x_lines: list[float] = []
+    y_lines: list[float] = []
+    z_lines: list[float] = []
+    for u, v in edges:
+        for index in (u, v):
+            z, y, x = vertices[index]
+            x_lines.append(float(x))
+            y_lines.append(float(y))
+            z_lines.append(float(z))
+        x_lines.append(None)  # type: ignore[arg-type]
+        y_lines.append(None)  # type: ignore[arg-type]
+        z_lines.append(None)  # type: ignore[arg-type]
+    return x_lines, y_lines, z_lines
 
 
 def show_skullstrip_status(status: dict[str, bool], selected_method: str) -> None:
@@ -717,12 +785,15 @@ def show_command_attempts_text(text: str) -> None:
         st.code(text[-8000:])
 
 
-def mesh_output_path(mask_meta: dict) -> Path:
+def mesh_output_path(mask_meta: dict, surface_mode: str = "Brain mask surface") -> Path:
     method = str(mask_meta.get("method", "")).lower()
+    mode_suffix = "_intensity" if surface_mode == "Brain intensity surface" else ""
     if "synthstrip" in method:
-        return OUTPUT_DIR / "brain_mesh_synthstrip.stl"
+        return OUTPUT_DIR / f"brain_mesh_synthstrip{mode_suffix}.stl"
     if "hd-bet" in method:
-        return OUTPUT_DIR / "brain_mesh_hdbet.stl"
+        return OUTPUT_DIR / f"brain_mesh_hdbet{mode_suffix}.stl"
+    if mode_suffix:
+        return OUTPUT_DIR / f"brain_mesh{mode_suffix}.stl"
     return MESH_PATH
 
 
