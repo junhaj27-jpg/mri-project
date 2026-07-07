@@ -115,10 +115,102 @@ def build_final_brain_mesh_from_mask(
 ) -> BrainMesh:
     source = str(mask_source or "").lower()
     path = Path(brain_mask_path) if brain_mask_path is not None else None
-    if not reliable_mask or source not in {"synthstrip", "hd-bet"} or path is None or not path.exists():
+    if not reliable_mask or source not in {"synthstrip", "hd-bet", "cached_brain_mask"} or path is None or not path.exists():
         raise ValueError("SynthStrip or HD-BET brain_mask.nii.gz is required for final 3D brain mesh.")
     mask = np.asarray(brain_mask) > 0.5
     return build_brain_mesh_from_mask(mask.astype(np.uint8), spacing=spacing, level=0.5, **kwargs)
+
+
+def build_mesh_from_mask(
+    mask_path: str | Path = "outputs/brain_mask.nii.gz",
+    output_path: str | Path = "outputs/brain_only_mesh.glb",
+    spacing: tuple[float, float, float] | None = None,
+    smooth: bool = True,
+) -> dict[str, Any]:
+    mask_path = Path(mask_path)
+    output_path = Path(output_path)
+    info: dict[str, Any] = {
+        "mask_path": str(mask_path),
+        "output_path": str(output_path),
+        "mask_shape": None,
+        "mask_unique_values": [],
+        "mask_sum": 0,
+    }
+    try:
+        import nibabel as nib  # type: ignore
+        import trimesh  # type: ignore
+
+        if not mask_path.exists():
+            raise FileNotFoundError(f"Mask file not found: {mask_path}")
+
+        nii = nib.load(str(mask_path))
+        data = np.asarray(nii.get_fdata())
+        mask = data > 0.5
+        unique_values = np.unique(data)
+        shown_unique = unique_values[:12]
+        info.update(
+            {
+                "mask_shape": tuple(int(value) for value in mask.shape),
+                "mask_unique_values": [json_safe_number(value) for value in shown_unique],
+                "mask_sum": int(np.count_nonzero(mask)),
+            }
+        )
+        if info["mask_sum"] == 0:
+            raise ValueError("Brain mask is empty after binary thresholding.")
+
+        if spacing is None:
+            zooms = tuple(float(value) for value in nii.header.get_zooms()[:3])
+            spacing = zooms if len(zooms) == 3 else (1.0, 1.0, 1.0)
+
+        vertices, faces, _, _ = measure.marching_cubes(
+            mask.astype(np.float32),
+            level=0.5,
+            spacing=tuple(float(value) for value in spacing),
+            allow_degenerate=False,
+        )
+        faces = remove_degenerate_faces(vertices.astype(np.float32), faces.astype(np.int32))
+        vertices, faces = compact_mesh(vertices.astype(np.float32), faces.astype(np.int32))
+        vertices, faces = keep_largest_mesh_component(vertices, faces)
+
+        tri_mesh: Any = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+        if smooth:
+            try:
+                trimesh.smoothing.filter_laplacian(tri_mesh, iterations=3)
+            except Exception:
+                LOGGER.exception("trimesh smoothing failed; exporting unsmoothed mesh")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        tri_mesh.export(str(output_path), file_type="glb")
+        return {
+            **info,
+            "ok": True,
+            "status": "ready",
+            "message": "3D mesh loaded",
+            "mesh_path": str(output_path),
+            "vertices": int(len(tri_mesh.vertices)),
+            "faces": int(len(tri_mesh.faces)),
+        }
+    except Exception as exc:
+        LOGGER.exception(
+            "Mesh generation failed mask_path=%s shape=%s sum=%s output_path=%s",
+            mask_path,
+            info.get("mask_shape"),
+            info.get("mask_sum"),
+            output_path,
+        )
+        return {
+            **info,
+            "ok": False,
+            "status": "failed",
+            "message": f"Mesh generation failed: {exc}",
+            "mesh_path": None,
+            "exception": str(exc),
+        }
+
+
+def json_safe_number(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 def build_brain_intensity_mesh_from_volume(

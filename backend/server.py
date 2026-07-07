@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from brain_mask import create_brain_mask, create_filled_brain_surface_mask, refine_brain_mask
-from mesh_builder import BrainMesh, build_brain_mesh_from_mask, build_final_brain_mesh_from_mask, export_glb
+from mesh_builder import BrainMesh, build_brain_mesh_from_mask, build_final_brain_mesh_from_mask, build_mesh_from_mask, export_glb
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_brain_extracted, save_nifti_mask, save_nifti_volume
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER
@@ -111,6 +111,8 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_static(FRONTEND_DIR / path.removeprefix("/"))
             elif path.startswith("/static/"):
                 self.send_static(FRONTEND_DIR / path.removeprefix("/"))
+            elif path.startswith("/outputs/"):
+                self.send_output_file(path)
             elif path == "/health":
                 self.send_json({"status": "ok", "project": "aidlc-mri"})
             elif path == "/api/project-summary":
@@ -139,6 +141,12 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_clear_outputs())
             elif path == "/api/run_hdbet":
                 self.send_json(api_run_hdbet())
+            elif path == "/api/build-mesh":
+                self.send_json(api_build_mesh(query))
+            elif path == "/api/build-debug-mesh":
+                self.send_json(api_build_debug_mesh(query))
+            elif path == "/api/mesh-status":
+                self.send_json(api_mesh_status())
             elif path == "/api/mask_overlay":
                 self.send_bytes(api_mask_overlay_png(query), "image/png")
             elif path == "/api/mesh":
@@ -149,6 +157,25 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_error(404, "Not found")
         except Exception as exc:
             LOGGER.error("request failed: %s\n%s", exc, traceback.format_exc())
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps({"error": str(exc), "traceback": traceback.format_exc()}, ensure_ascii=False).encode("utf-8")
+            )
+
+    def do_POST(self) -> None:
+        try:
+            parsed = urlparse(self.path)
+            query = parse_qs(parsed.query)
+            if parsed.path == "/api/build-mesh":
+                self.send_json(api_build_mesh(query))
+            elif parsed.path == "/api/build-debug-mesh":
+                self.send_json(api_build_debug_mesh(query))
+            else:
+                self.send_error(404, "Not found")
+        except Exception as exc:
+            LOGGER.error("post request failed: %s\n%s", exc, traceback.format_exc())
             self.send_response(500)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -179,6 +206,19 @@ class BackendHandler(BaseHTTPRequestHandler):
             return
         if not path.exists() or not path.is_file():
             self.send_error(404, "Static file not found")
+            return
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.send_bytes(path.read_bytes(), content_type)
+
+    def send_output_file(self, request_path: str) -> None:
+        relative = request_path.removeprefix("/outputs/").replace("/", "\\")
+        path = (OUTPUT_DIR / relative).resolve()
+        output_root = OUTPUT_DIR.resolve()
+        if output_root not in path.parents and path != output_root:
+            self.send_error(403, "Forbidden")
+            return
+        if not path.exists() or not path.is_file():
+            self.send_error(404, "Output file not found")
             return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self.send_bytes(path.read_bytes(), content_type)
@@ -564,6 +604,136 @@ def api_run_hdbet() -> dict:
     }
 
 
+def api_mesh_status() -> dict:
+    mask_state = current_mask_state()
+    mesh_available = BRAIN_ONLY_MESH_PATH.exists() and bool(mask_state["reliable_mask"])
+    debug_mesh_available = DEBUG_MASK_MESH_PATH.exists()
+    if mesh_available:
+        status = "3D mesh loaded"
+    elif debug_mesh_available and not mask_state["reliable_mask"]:
+        status = "Brain mask is debug only. Final 3D disabled."
+    else:
+        status = "No mesh generated yet"
+    return {
+        "ok": True,
+        "status": status,
+        "mesh_available": mesh_available,
+        "debug_mesh_available": debug_mesh_available,
+        "mesh_path": str(BRAIN_ONLY_MESH_PATH) if mesh_available else "",
+        "debug_mesh_path": str(DEBUG_MASK_MESH_PATH) if debug_mesh_available else "",
+        "mask_source": mask_state["mask_source"],
+        "mask_status": mask_state["mask_status"],
+        "reliable_mask": mask_state["reliable_mask"],
+        "brain_mask_path": str(RAW_MASK_PATH) if RAW_MASK_PATH.exists() else "",
+        "last_error": str(STATE.get("last_error") or ""),
+    }
+
+
+def api_build_mesh(query: dict[str, list[str]]) -> dict:
+    mri_data = require_mri()
+    result = ensure_mask_result(mri_data)
+    diagnostics = effective_mask_diagnostics(result)
+    source = mask_source_label(result)
+    reliable_mask = bool(
+        source in {"hd-bet", "synthstrip", "cached_brain_mask"}
+        and diagnostics.get("mask_status") == "valid"
+        and RAW_MASK_PATH.exists()
+        and is_final_mask_allowed(result, diagnostics)
+    )
+    if not reliable_mask:
+        if BRAIN_ONLY_MESH_PATH.exists():
+            BRAIN_ONLY_MESH_PATH.unlink()
+        message = "Final 3D is disabled because reliable skull stripping mask is not available."
+        STATE["last_error"] = message
+        LOGGER.warning("%s source=%s status=%s path=%s", message, source, diagnostics.get("mask_status"), RAW_MASK_PATH)
+        return {
+            "ok": False,
+            "status": "debug_only",
+            "message": "HD-BET or SynthStrip brain mask is required for final 3D brain mesh.",
+            "warning": message,
+            "mesh_path": None,
+            "mask_path": str(RAW_MASK_PATH),
+            "mask_source": source,
+            "mask_status": diagnostics.get("mask_status"),
+            "reliable_mask": False,
+            "debug_only": True,
+            "mask_shape": tuple(int(value) for value in result.mask.shape),
+            "mask_unique_values": diagnostics.get("mask_unique_values"),
+            "mask_sum": int(np.count_nonzero(binarize_mask(result.mask))),
+        }
+
+    STATE["mesh"] = None
+    mesh_result = build_mesh_from_mask(
+        mask_path=RAW_MASK_PATH,
+        output_path=BRAIN_ONLY_MESH_PATH,
+        spacing=mri_data.spacing,
+        smooth=int(first(query, "smooth", "1")) > 0,
+    )
+    mesh_result.update(
+        {
+            "mask_source": source,
+            "mask_status": diagnostics.get("mask_status"),
+            "reliable_mask": bool(mesh_result.get("ok")),
+            "reliable_for_3d": bool(mesh_result.get("ok")),
+            "debug_only": False,
+        }
+    )
+    if mesh_result.get("ok"):
+        STATE["last_error"] = ""
+        LOGGER.info("3D mesh loaded path=%s vertices=%s faces=%s", mesh_result.get("mesh_path"), mesh_result.get("vertices"), mesh_result.get("faces"))
+    else:
+        STATE["last_error"] = str(mesh_result.get("message") or "Mesh generation failed.")
+        LOGGER.error(
+            "Mesh generation failed mask_path=%s shape=%s unique=%s sum=%s output=%s error=%s",
+            mesh_result.get("mask_path"),
+            mesh_result.get("mask_shape"),
+            mesh_result.get("mask_unique_values"),
+            mesh_result.get("mask_sum"),
+            mesh_result.get("output_path"),
+            mesh_result.get("exception") or mesh_result.get("message"),
+        )
+    return mesh_result
+
+
+def api_build_debug_mesh(query: dict[str, list[str]]) -> dict:
+    mri_data = require_mri()
+    result = ensure_mask_result(mri_data)
+    diagnostics = effective_mask_diagnostics(result)
+    debug_mask = binarize_mask(result.mask)
+    save_nifti_mask(debug_mask, mri_data.affine, FALLBACK_MASK_PATH)
+    mesh_result = build_mesh_from_mask(
+        mask_path=FALLBACK_MASK_PATH,
+        output_path=DEBUG_MASK_MESH_PATH,
+        spacing=mri_data.spacing,
+        smooth=int(first(query, "smooth", "1")) > 0,
+    )
+    mesh_result.update(
+        {
+            "ok": bool(mesh_result.get("ok")),
+            "status": "debug_only" if mesh_result.get("ok") else "failed",
+            "message": "DEBUG ONLY - not final brain extraction"
+            if mesh_result.get("ok")
+            else mesh_result.get("message", "Mesh generation failed."),
+            "warning": "DEBUG ONLY - not final brain extraction",
+            "mask_source": mask_source_label(result),
+            "mask_status": diagnostics.get("mask_status"),
+            "reliable_mask": False,
+            "reliable_for_3d": False,
+            "debug_only": True,
+        }
+    )
+    STATE["last_error"] = "" if mesh_result.get("ok") else str(mesh_result.get("message") or "Debug mesh generation failed.")
+    LOGGER.info(
+        "Debug mesh status=%s mask_path=%s shape=%s sum=%s output=%s",
+        mesh_result.get("status"),
+        mesh_result.get("mask_path"),
+        mesh_result.get("mask_shape"),
+        mesh_result.get("mask_sum"),
+        mesh_result.get("output_path"),
+    )
+    return mesh_result
+
+
 def api_mesh(query: dict[str, list[str]]) -> dict:
     mri_data = require_mri()
     result = ensure_mask_result(mri_data)
@@ -814,7 +984,7 @@ def current_mask_state() -> dict:
         source_meta = load_mask_source_metadata()
         source = str(source_meta.get("mask_source") or "cached_unknown").lower()
         status = str(source_meta.get("mask_status") or "missing")
-        reliable = source in {"synthstrip", "hd-bet"} and status == "valid"
+        reliable = source in {"synthstrip", "hd-bet", "cached_brain_mask"} and status == "valid"
         return {"mask_source": source if reliable else "cached_unknown", "mask_status": status, "reliable_mask": reliable}
     if FALLBACK_MASK_PATH.exists():
         return {"mask_source": "fallback_threshold", "mask_status": "invalid_threshold_noise", "reliable_mask": False}
@@ -960,7 +1130,7 @@ def is_final_mask_allowed(
         result.reliable_for_3d
         and not result.debug_only
         and not result.metadata.get("quality_warnings")
-        and source in {"synthstrip", "hd-bet"}
+        and source in {"synthstrip", "hd-bet", "cached_brain_mask"}
         and (RAW_MASK_PATH.exists() if require_mask_file else True)
         and diagnostics.get("mask_status") == "valid"
     )
@@ -972,7 +1142,7 @@ def load_cached_brain_mask_result(mri_data: MRIData) -> SkullStripResult | None:
     source_meta = load_mask_source_metadata()
     source = str(source_meta.get("mask_source", "")).lower()
     generated_at = str(source_meta.get("generated_at") or "")
-    if source not in {"synthstrip", "hd-bet"} or not generated_at:
+    if source not in {"synthstrip", "hd-bet", "cached_brain_mask"} or not generated_at:
         LOGGER.warning(
             "Cached brain_mask.nii.gz has no reliable SynthStrip/HD-BET source and generated_at metadata; using fallback/debug path."
         )
@@ -1020,6 +1190,8 @@ def mask_source_label(result: SkullStripResult) -> str:
         return "synthstrip"
     if "hd-bet" in source or "hdbet" in source:
         return "hd-bet"
+    if "cached_brain_mask" in source or "cached brain_mask" in source:
+        return "cached_brain_mask"
     if "ellipse" in source:
         return "ellipse_debug"
     if "fallback" in source or result.debug_only:
@@ -1089,7 +1261,7 @@ def reliable_mask_file_exists() -> bool:
     if isinstance(cached, SkullStripResult):
         return is_final_mask_allowed(cached, require_mask_file=True)
     source = str(load_mask_source_metadata().get("mask_source", "")).lower()
-    return RAW_MASK_PATH.exists() and source in {"synthstrip", "hd-bet"}
+    return RAW_MASK_PATH.exists() and source in {"synthstrip", "hd-bet", "cached_brain_mask"}
 
 
 def display_mask_path() -> Path | None:
@@ -1112,7 +1284,7 @@ def effective_mask_diagnostics(result: SkullStripResult) -> dict:
     source = mask_source_label(result)
     metadata_status = str(result.metadata.get("mask_status") or "").lower()
     if (
-        source in {"synthstrip", "hd-bet"}
+        source in {"synthstrip", "hd-bet", "cached_brain_mask"}
         and result.reliable_for_3d
         and not result.debug_only
         and metadata_status == "valid"

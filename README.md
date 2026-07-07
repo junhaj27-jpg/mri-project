@@ -78,6 +78,18 @@ Optional brain extraction tools:
 
 See [INSTALL.md](INSTALL.md) for HD-BET and SynthStrip notes.
 
+HD-BET can be installed into the project virtualenv:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install hd-bet
+```
+
+The local web app checks HD-BET with:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import HD_BET; print('HD_BET installed')"
+```
+
 ## Backend API
 
 The local web frontend uses these endpoints:
@@ -89,6 +101,10 @@ The local web frontend uses these endpoints:
 - `GET /api/studies`
 - `GET /api/load`
 - `GET /api/slice`
+- `GET /api/mask`
+- `GET /api/rebuild_mask`
+- `GET /api/clear_outputs`
+- `GET /api/run_hdbet`
 - `GET /api/mesh`
 - `GET /api/mesh_plot`
 - `GET /api/tracking`
@@ -113,7 +129,73 @@ Final brain-only 3D mesh generation should use a reliable skull-stripping result
 
 Simple threshold fallback is debug-only. It must not be treated as final brain-only 3D output.
 
-3D mesh generation uses a processed brain mask or exported mask file, then renders with Plotly.
+The app treats a mask as reliable only when all of these are true:
+
+- `mask_source` is `synthstrip` or `hd-bet`
+- `mask_status` is `valid`
+- `outputs/brain_mask.nii.gz` exists
+- `reliable_mask` is `true`
+
+Fallback threshold, cached unknown, ellipse/ROI/debug masks are always unreliable. If a reliable mask is not available, final 3D generation returns:
+
+```json
+{
+  "ok": false,
+  "status": "debug_only",
+  "message": "SynthStrip or HD-BET brain mask is required for final 3D brain mesh.",
+  "mesh_path": null
+}
+```
+
+Final 3D mesh generation runs marching cubes only on `outputs/brain_mask.nii.gz`. It does not run marching cubes on the original MRI intensity volume or threshold fallback mask.
+
+## HD-BET Workflow
+
+On the 3D Viewer page:
+
+```text
+http://127.0.0.1:8000/three-d
+```
+
+Use these buttons:
+
+- `Load volume`: load the selected DICOM series.
+- `Clear outputs`: remove generated masks, meshes, NIfTI files, and overlay PNGs from `outputs/`.
+- `Rebuild mask`: clear mask/mesh cache and reset mask state.
+- `Run HD-BET`: convert the current DICOM series to `outputs/input.nii.gz`, run HD-BET, and save `outputs/brain_mask.nii.gz`.
+- `Build final 3D mesh`: create `outputs/brain_only_mesh.glb` only when the HD-BET/SynthStrip mask is reliable.
+
+The app first tries the requested command style:
+
+```powershell
+python -m HD_BET.run -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu -mode fast
+```
+
+For installed `hd-bet` versions that expose `HD_BET.entry_point` instead of `HD_BET.run`, it falls back to:
+
+```powershell
+python -m HD_BET.entry_point -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu --disable_tta --save_bet_mask
+```
+
+The app then searches HD-BET mask outputs such as:
+
+```text
+outputs/brain_only_mask.nii.gz
+outputs/brain_only_bet.nii.gz
+outputs/input_mask.nii.gz
+outputs/input_bet.nii.gz
+outputs/*mask*.nii.gz
+outputs/*_mask.nii.gz
+outputs/*_bet.nii.gz
+```
+
+When a valid HD-BET mask is found, it is copied/saved as:
+
+```text
+outputs/brain_mask.nii.gz
+```
+
+The preview overlay is then drawn from this binary mask only.
 
 ## Output Files
 
@@ -121,13 +203,31 @@ Common generated outputs:
 
 ```text
 outputs/brain_mask.nii.gz
-outputs/refined_brain_mask.nii.gz
-outputs/filled_brain_mask.nii.gz
-outputs/brain_extracted.nii.gz
-outputs/brain_mesh_backend.stl
+outputs/brain_mask_source.json
+outputs/input.nii.gz
+outputs/brain_only.nii.gz
+outputs/brain_only_bet.nii.gz
+outputs/brain_only_mesh.glb
+outputs/brain_overlay.png
+outputs/brain_overlay_axial.png
+outputs/brain_overlay_sagittal.png
+outputs/brain_overlay_coronal.png
 ```
 
 Availability depends on the selected processing path and installed skull-stripping tools.
+
+Debug-only fallback outputs may include:
+
+```text
+outputs/fallback_preview_mask.nii.gz
+outputs/debug_mask_mesh.glb
+outputs/debug_mask_overlay.png
+outputs/debug_mask_overlay_axial.png
+outputs/debug_mask_overlay_sagittal.png
+outputs/debug_mask_overlay_coronal.png
+```
+
+These debug outputs are not final brain extraction results.
 
 ## Repository Structure
 
@@ -155,7 +255,8 @@ Recent local verification:
 - `/volume` renders T01 to T14 mock tracking rows.
 - `/ai` renders mask/mesh readiness checks.
 - `/viewer` keeps the 2D grayscale slice workflow.
-- `/three-d` keeps the 3D preview workflow.
+- `/three-d` runs HD-BET from the project virtualenv, saves `outputs/brain_mask.nii.gz`, and builds `outputs/brain_only_mesh.glb` only when `reliable_mask=true`.
+- Threshold fallback remains `invalid_threshold_noise` / debug-only and cannot create final 3D output.
 
 ## Docker
 
