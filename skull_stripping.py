@@ -65,8 +65,9 @@ def get_hdbet_debug_info(output_dir: str | Path = "outputs") -> dict[str, object
         },
         key=lambda path: path.name.lower(),
     )
-    pip_show = run_probe([str(venv_python), "-m", "pip", "show", "hd-bet"]) if venv_python.exists() else probe_not_found(str(venv_python))
-    import_probe = run_probe([str(venv_python), "-c", "import HD_BET; print('import HD_BET ok')"]) if venv_python.exists() else probe_not_found(str(venv_python))
+    probe_python = venv_python if venv_python.exists() else Path(sys.executable)
+    pip_show = run_probe([str(probe_python), "-m", "pip", "show", "hd-bet"])
+    import_probe = run_probe([str(probe_python), "-c", "import HD_BET; print('import HD_BET ok')"])
     candidates = hdbet_command_candidates(None)
     executable_found = any(bool(item.get("resolved")) for item in candidates)
     output_ready = brain_output.exists() and any(path.exists() for path in mask_candidates)
@@ -74,7 +75,7 @@ def get_hdbet_debug_info(output_dir: str | Path = "outputs") -> dict[str, object
         status = "HD-BET ready"
         reason = "Existing HD-BET brain_extracted and mask candidate files were found."
     elif executable_found:
-        status = "HD-BET found but not validated"
+        status = "HD-BET found but failed"
         reason = "A command or local executable was found, but no successful output was detected."
     else:
         status = "HD-BET not found"
@@ -193,7 +194,7 @@ def run_skull_stripping(
     mask_path = output_dir / "brain_mask.nii.gz"
     refined_mask_path = output_dir / "refined_brain_mask.nii.gz"
     filled_mask_path = output_dir / "filled_brain_mask.nii.gz"
-    brain_path = output_dir / "brain_extracted.nii.gz"
+    brain_path = output_dir / "debug_brain_only.nii.gz"
     save_nifti_volume(mri_data.volume, mri_data.affine, input_path)
 
     preferred = method.lower()
@@ -339,7 +340,8 @@ def run_hdbet(
     command: str,
     device: str = "cuda",
 ) -> tuple[np.ndarray, list[dict]]:
-    output_no_ext = strip_nii_suffix(brain_path)
+    if not str(brain_path).endswith(".nii.gz"):
+        raise ValueError(f"HD-BET output path must end with .nii.gz: {brain_path}")
     requested_device = "cuda" if str(device).lower() in {"cuda", "gpu"} else "cpu"
     device_candidates = [requested_device]
     if requested_device == "cuda":
@@ -368,35 +370,29 @@ def run_hdbet(
                     hdbet_args.append("--disable_tta")
                 result = subprocess.run(
                     cmd + hdbet_args,
-                    check=True,
+                    check=False,
                     capture_output=True,
                     text=True,
                     timeout=900,
                 )
+                mask_candidate = find_hdbet_mask(brain_path, mask_path)
+                brain_output_exists = brain_path.exists()
+                succeeded = result.returncode == 0 and brain_output_exists and mask_candidate is not None
                 attempts.append(
                     {
                         "label": f"{label} ({run_device})",
                         "command": " ".join(cmd + hdbet_args),
-                        "status": "succeeded",
+                        "status": "HD-BET ready" if succeeded else classify_hdbet_failure(result.returncode, result.stdout, result.stderr),
                         "returncode": result.returncode,
                         "stdout": result.stdout,
                         "stderr": result.stderr,
+                        "brain_output_path": str(brain_path),
+                        "brain_output_exists": brain_output_exists,
+                        "mask_candidate": str(mask_candidate) if mask_candidate else "",
                     }
                 )
-                break
-            except subprocess.CalledProcessError as exc:
-                stderr_text = exc.stderr or ""
-                stdout_text = exc.stdout or ""
-                attempts.append(
-                    {
-                        "label": f"{label} ({run_device})",
-                        "command": " ".join(cmd + hdbet_args),
-                        "status": classify_hdbet_failure(exc.returncode, stdout_text, stderr_text),
-                        "returncode": exc.returncode,
-                        "stdout": stdout_text,
-                        "stderr": stderr_text,
-                    }
-                )
+                if succeeded:
+                    return load_nifti_mask(mask_candidate), attempts
             except Exception as exc:
                 attempts.append(
                     {
@@ -408,16 +404,13 @@ def run_hdbet(
                         "stderr": repr(exc),
                     }
                 )
-        if attempts and attempts[-1].get("status") == "succeeded":
-            break
-    else:
-        raise RuntimeError("HD-BET failed with all command candidates:\n" + format_command_attempts(attempts))
-
-    mask_candidate = find_hdbet_mask(brain_path, mask_path)
-    if mask_candidate is not None:
-        return load_nifti_mask(mask_candidate), attempts
     generated = sorted(str(path) for path in brain_path.parent.glob("*.nii.gz"))
-    raise FileNotFoundError("HD-BET did not create a mask file. Generated files: " + "; ".join(generated))
+    raise RuntimeError(
+        "HD-BET failed with all command candidates:\n"
+        + format_command_attempts(attempts)
+        + "\nGenerated files: "
+        + "; ".join(generated)
+    )
 
 
 def project_venv_scripts_dir() -> Path:
@@ -431,15 +424,16 @@ def project_venv_python() -> Path:
 def hdbet_command_candidates(command: str | None = None) -> list[dict]:
     venv_scripts = project_venv_scripts_dir()
     venv_python = project_venv_python()
+    entry_point_available = module_exists("HD_BET.entry_point", venv_python) if venv_python.exists() else False
     candidates = [
+        command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
         command_candidate_from_which("hd-bet"),
         command_candidate_from_which("HD_BET"),
-        command_candidate_from_path(r".venv\Scripts\hd-bet.exe", venv_scripts / "hd-bet.exe"),
         {
             "label": r".venv\Scripts\python.exe -m HD_BET.entry_point",
             "cmd": [str(venv_python), "-m", "HD_BET.entry_point"],
-            "resolved": venv_python.exists(),
-            "error": "" if venv_python.exists() else f"File not found: {venv_python}",
+            "resolved": entry_point_available,
+            "error": "" if entry_point_available else "HD_BET.entry_point is not importable in the project virtualenv.",
         },
     ]
     custom = str(command or "").strip()
@@ -488,10 +482,12 @@ def classify_hdbet_failure(returncode: int | None, stdout: str, stderr: str) -> 
     text = f"{stdout}\n{stderr}"
     if returncode == 3221225786:
         return "HD-BET installed but crashed on Windows native runtime"
-    if "Output file must end with .nii.gz" in text:
+    if returncode == 1 and (".nii.gz" in text or "output" in text.lower()):
         return "HD-BET installed but command arguments are invalid"
     if returncode is None:
         return "failed"
+    if returncode == 0:
+        return "HD-BET ran but expected output files were not created"
     return "failed"
 
 
@@ -620,12 +616,16 @@ def validate_brain_mask(
             center_region += ((grid[axis] - center[axis]) / radii[axis]) ** 2
         center_region = center_region <= 1.0
         center_coverage = float(np.count_nonzero(mask & center_region)) / max(int(np.count_nonzero(center_region)), 1)
-        if center_coverage < 0.25:
-            warnings.append("Mask does not sufficiently include the central brain region.")
+        if center_coverage < 0.55:
+            warnings.append("Mask has a large central void; final brain-only mesh is disabled.")
 
         filled = ndi.binary_fill_holes(mask.astype(bool))
         hole_voxels = int(np.count_nonzero(filled & ~mask.astype(bool)))
-        hole_ratio = hole_voxels / max(int(np.count_nonzero(filled)), 1)
-        if hole_ratio > 0.08:
+        filled_voxels = int(np.count_nonzero(filled))
+        hole_ratio = hole_voxels / max(filled_voxels, 1)
+        fill_coverage = voxels / max(filled_voxels, 1)
+        if fill_coverage < 0.90:
+            warnings.append("Mask fills less than 90% of its internally filled brain volume; final brain-only mesh is disabled.")
+        if hole_ratio > 0.05:
             warnings.append("Mask has too many internal holes; skull stripping failed.")
     return warnings

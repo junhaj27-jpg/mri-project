@@ -1,6 +1,7 @@
 const threeState = {
   status: null,
   series: [],
+  meshPreviewText: "",
 };
 
 const $3 = (id) => document.getElementById(id);
@@ -24,7 +25,7 @@ async function refreshThreeStatus() {
   $3("shapeText").textContent = formatShape(status.shape);
   $3("spacingText").textContent = formatSpacing(status.spacing);
   $3("seriesText").textContent = status.info?.SeriesDescription || status.source_label || "-";
-  $3("meshText").textContent = status.mesh_available ? "available" : "not generated";
+  $3("meshText").textContent = status.mesh_available ? "brain-only mesh available" : "not generated";
   if (status.disclaimer) $3("disclaimer").textContent = status.disclaimer;
   updateThreeSliceLimit();
 }
@@ -36,6 +37,11 @@ async function loadThreeVolume() {
     await apiGet(`/api/load?series_key=${key}`);
     await refreshThreeStatus();
     await refreshThreeSlice();
+    $3("meshFrame").removeAttribute("src");
+    $3("maskText").textContent = "not checked";
+    $3("maskRatioText").textContent = "-";
+    $3("maskUniqueText").textContent = "-";
+    $3("maskStatusText").textContent = "-";
   } finally {
     setBusy(false);
   }
@@ -63,20 +69,57 @@ async function refreshThreeSlice() {
 async function generateMesh() {
   setBusy(true);
   try {
-    const sigma = encodeURIComponent($3("sigmaInput").value);
-    const smooth = encodeURIComponent($3("smoothInput").value);
-    const downsample = encodeURIComponent($3("downsampleInput").value);
+    const { sigma, smooth, downsample } = meshParams();
     const meta = await apiGet(`/api/mesh?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1`);
-    $3("meshText").textContent = `${meta.vertices} vertices / ${meta.faces} faces`;
-    $3("meshFrame").src = `/api/mesh_plot?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
+    const mode = meta.reliable_for_3d ? "brain-only" : "debug only / not final brain mask";
+    threeState.meshPreviewText = `${mode}: ${meta.vertices} vertices / ${meta.faces} faces`;
+    $3("meshText").textContent = threeState.meshPreviewText;
+    loadMeshPreview();
   } finally {
     setBusy(false);
   }
 }
 
+async function generateMask() {
+  setBusy(true);
+  try {
+    const mask = await apiGet("/api/mask");
+    $3("maskText").textContent = mask.reliable_for_3d ? "reliable brain mask" : "debug fallback mask";
+    $3("maskRatioText").textContent = String(mask.mask_ratio ?? "-");
+    $3("maskUniqueText").textContent = Array.isArray(mask.mask_unique_values) ? mask.mask_unique_values.join(", ") : "-";
+    $3("maskStatusText").textContent = mask.mask_status || "-";
+    $3("meshText").textContent = mask.reliable_for_3d ? "ready for brain-only mesh" : "debug only; SynthStrip/HD-BET unavailable or failed";
+    $3("sliceImage").src = `/api/mask_overlay?t=${Date.now()}`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function meshParams() {
+  return {
+    sigma: encodeURIComponent($3("sigmaInput").value),
+    smooth: encodeURIComponent($3("smoothInput").value),
+    downsample: encodeURIComponent($3("downsampleInput").value),
+  };
+}
+
+function loadMeshPreview() {
+  const { sigma, smooth, downsample } = meshParams();
+  $3("meshText").textContent = "loading preview";
+  $3("meshFrame").src = `/api/mesh_plot?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
+}
+
 function bindThreeControls() {
   $3("loadButton").addEventListener("click", loadThreeVolume);
+  $3("maskButton").addEventListener("click", generateMask);
   $3("meshButton").addEventListener("click", generateMesh);
+  $3("meshFrame").addEventListener("load", () => {
+    if ($3("meshFrame").getAttribute("src")) {
+      if ($3("meshText").textContent === "loading preview") {
+        $3("meshText").textContent = threeState.meshPreviewText || "mask-based mesh preview available";
+      }
+    }
+  });
   $3("planeSelect").addEventListener("change", refreshThreeSlice);
   $3("maskToggle").addEventListener("change", refreshThreeSlice);
   $3("sliceRange").addEventListener("input", () => {
@@ -91,9 +134,6 @@ async function bootThree() {
   try {
     await loadThreeSeriesList();
     await loadThreeVolume();
-    if (threeState.status?.mesh_available) {
-      $3("meshFrame").src = `/api/mesh_plot?t=${Date.now()}`;
-    }
   } finally {
     setBusy(false);
   }

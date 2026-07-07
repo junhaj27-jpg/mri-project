@@ -34,6 +34,7 @@ async function loadVolume() {
     const key = encodeURIComponent($("seriesSelect").value);
     await apiGet(`/api/load?series_key=${key}`);
     await refreshStatus();
+    resetMaskStatus();
     await refreshSlice();
   } finally {
     setBusy(false);
@@ -61,9 +62,31 @@ async function refreshSlice() {
   $("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
 }
 
+function resetMaskStatus() {
+  $("maskText").textContent = "not checked";
+  $("maskRatioText").textContent = "-";
+  $("maskUniqueText").textContent = "-";
+  $("maskStatusText").textContent = "-";
+}
+
+async function generateMask() {
+  setBusy(true);
+  try {
+    const mask = await apiGet("/api/mask");
+    $("maskText").textContent = mask.reliable_for_3d ? "reliable brain mask" : "debug fallback mask";
+    $("maskRatioText").textContent = String(mask.mask_ratio ?? "-");
+    $("maskUniqueText").textContent = Array.isArray(mask.mask_unique_values) ? mask.mask_unique_values.join(", ") : "-";
+    $("maskStatusText").textContent = mask.mask_status || "-";
+    await refreshSlice();
+  } finally {
+    setBusy(false);
+  }
+}
+
 function bindViewerControls() {
   $("loadButton").addEventListener("click", loadVolume);
   $("refreshSliceButton").addEventListener("click", refreshSlice);
+  $("maskButton").addEventListener("click", generateMask);
   $("planeSelect").addEventListener("change", refreshSlice);
   $("maskToggle").addEventListener("change", refreshSlice);
   $("sliceRange").addEventListener("input", () => {

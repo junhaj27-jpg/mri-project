@@ -463,6 +463,19 @@ def export_stl(mesh: BrainMesh, output_path: str | Path) -> Path:
     return output_path
 
 
+def export_glb(mesh: BrainMesh, output_path: str | Path) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import trimesh  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("GLB export requires trimesh. Install requirements.txt first.") from exc
+
+    tri_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+    tri_mesh.export(str(output_path), file_type="glb")
+    return output_path
+
+
 def triangle_normal(triangle: np.ndarray) -> np.ndarray:
     normal = np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
     norm = float(np.linalg.norm(normal))

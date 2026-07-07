@@ -200,7 +200,8 @@ def show_3d_mode(mri_data: MRIData) -> None:
     cuda_status = get_torch_cuda_status()
     reliable_tool_available = has_reliable_skullstrip_tool(skullstrip_status)
     hdbet_ready = hdbet_debug.get("status") == "HD-BET ready"
-    effective_tool_available = reliable_tool_available or hdbet_ready
+    hdbet_found = hdbet_debug.get("status") != "HD-BET not found"
+    effective_tool_available = reliable_tool_available or hdbet_ready or hdbet_found
     with st.sidebar:
         st.subheader("Brain-only segmentation")
         method = st.selectbox("Skull stripping method", ["SynthStrip recommended", "HD-BET", "Simple fallback debug only"], index=0)
@@ -244,14 +245,20 @@ def show_3d_mode(mri_data: MRIData) -> None:
         show_wireframe = st.checkbox("Show wireframe", value=False)
         skullstrip_run_disabled = not effective_tool_available and not method.startswith("Simple fallback")
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary", disabled=skullstrip_run_disabled)
-        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not effective_tool_available)
+        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not hdbet_ready and not reliable_tool_available)
 
     st.subheader("3D brain-only mesh")
-    if not effective_tool_available:
+    if hdbet_ready:
+        st.success("HD-BET: ready")
+        st.write("Mask source: `HD-BET`")
+        st.write("Final brain-only 3D: `enabled`")
+    elif hdbet_found:
+        st.warning("HD-BET: found but failed")
+        st.write(f"reason: `{hdbet_debug.get('reason', 'No successful HD-BET output detected.')}`")
+        st.write("Final brain-only 3D: `disabled`")
+    elif not effective_tool_available:
         st.warning(skullstrip_unavailable_message())
         show_install_help()
-    elif hdbet_ready:
-        st.success("HD-BET: ready")
     if method.startswith("Simple fallback"):
         st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
 
@@ -267,7 +274,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         main_create_clicked = st.button(
             "Generate final brain-only 3D mesh",
             use_container_width=True,
-            disabled=method.startswith("Simple fallback") or not effective_tool_available,
+            disabled=method.startswith("Simple fallback") or not hdbet_ready and not reliable_tool_available,
         )
     with cols[2]:
         if st.button("Use default fast settings", use_container_width=True):
@@ -342,7 +349,13 @@ def show_3d_mode(mri_data: MRIData) -> None:
             if "Reliable skull stripping tool is not available" in str(exc):
                 st.warning(skullstrip_unavailable_message())
                 show_command_attempts_text(str(exc))
-                show_install_help()
+                if hdbet_found:
+                    st.warning("HD-BET: found but failed")
+                    st.write("Final brain-only 3D: `disabled`")
+                    if "3221225786" in str(exc):
+                        st.warning("HD-BET is installed but crashed on Windows native runtime. Try WSL2 Ubuntu, Docker, or SynthStrip.")
+                else:
+                    show_install_help()
             else:
                 st.error("3D rendering failed. Check the log.")
                 st.exception(exc)
@@ -862,11 +875,16 @@ def show_hdbet_debug_summary(info: dict[str, object]) -> None:
     status = str(info.get("status", "unknown"))
     st.write(f"HD-BET: `{status}`")
     st.caption(str(info.get("reason", "")))
+    if status == "HD-BET ready":
+        st.write("Mask source: `HD-BET`")
+        st.write("Final brain-only 3D: `enabled`")
+    elif status == "HD-BET found but failed":
+        st.write("Final brain-only 3D: `disabled`")
     if status != "HD-BET ready" and (
         info.get("local_hd_bet_exists") or info.get("which_hd_bet") or info.get("which_HD_BET")
     ):
         st.warning("HD-BET found but failed validation. Check the debug log below.")
-    with st.expander("HD-BET detection/debug", expanded=status != "HD-BET ready"):
+    with st.expander("HD-BET debug log", expanded=status != "HD-BET ready"):
         st.write(f"sys.executable: `{info.get('sys_executable')}`")
         st.write(f"current working directory: `{info.get('cwd')}`")
         st.write(f"venv path: `{info.get('venv_path')}`")
@@ -934,7 +952,7 @@ After installation:
 ```powershell
 where hd-bet
 where HD_BET
-python -m HD_BET -h
+python -m HD_BET.entry_point -h
 ```
 
 If the command is still not found, check the virtualenv Scripts path:
@@ -954,12 +972,17 @@ If Windows native HD-BET exits with `3221225786`, use WSL2 Ubuntu or Docker/Synt
 def show_command_attempts(attempts: list[dict]) -> None:
     if not attempts:
         return
-    with st.expander("HD-BET command attempts", expanded=False):
+    with st.expander("HD-BET debug log", expanded=False):
         for attempt in attempts:
             st.markdown(f"**{attempt.get('label', 'command')}**: `{attempt.get('status', 'unknown')}`")
             st.code(str(attempt.get("command", "")), language="powershell")
             if attempt.get("returncode") is not None:
                 st.write(f"returncode: `{attempt.get('returncode')}`")
+            if attempt.get("brain_output_path"):
+                st.write(f"brain output: `{attempt.get('brain_output_path')}`")
+                st.write(f"brain output exists: `{attempt.get('brain_output_exists')}`")
+            if attempt.get("mask_candidate"):
+                st.write(f"mask candidate: `{attempt.get('mask_candidate')}`")
             stdout = str(attempt.get("stdout") or "").strip()
             stderr = str(attempt.get("stderr") or "").strip()
             if stdout:

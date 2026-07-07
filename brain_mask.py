@@ -191,26 +191,40 @@ def create_brain_mask(
         return np.zeros_like(normalized, dtype=bool), {"method": method, "threshold": 0.0, "components": 0}
 
     base_threshold = float(filters.threshold_otsu(active))
-    threshold = float(np.clip(base_threshold * threshold_scale, 0.01, 0.95))
+    percentile_threshold = float(np.percentile(active, 35))
+    threshold = float(np.clip(min(base_threshold, percentile_threshold) * threshold_scale, 0.01, 0.95))
     foreground = normalized >= threshold
-
-    min_size = max(256, int(foreground.size * float(min_size_ratio)))
+    min_size = max(1024, int(foreground.size * float(min_size_ratio)))
     foreground = morphology.remove_small_objects(foreground, min_size=min_size)
+    foreground = largest_connected_component(foreground)
     foreground = ndi.binary_fill_holes(foreground)
-    foreground = morphology.binary_closing(foreground, morphology.ball(2))
-    foreground = morphology.binary_opening(foreground, morphology.ball(1))
-    foreground = keep_component_near_center(foreground)
 
     mask = estimate_brain_parenchyma_region(normalized, foreground, threshold, min_size, plane)
-    mask = peel_outer_tissue(mask, min_size, peel_iterations)
-    mask = solidify_surface_mask(mask)
+    if np.count_nonzero(mask) < min_size:
+        mask = foreground & apply_center_ellipsoid_prior(foreground, shrink=0.62)
+    mask = morphology.remove_small_objects(mask.astype(bool), min_size=max(512, min_size // 3))
     mask = keep_component_near_center(mask)
+    mask = fill_internal_holes_by_slices(mask)
+    mask = ndi.binary_fill_holes(mask)
+    mask = morphology.binary_closing(mask, morphology.ball(2))
+    mask = morphology.remove_small_holes(mask, area_threshold=max(2048, mask.size // 2000))
+    mask = morphology.remove_small_objects(mask, min_size=max(512, min_size // 3))
+    mask = keep_component_near_center(mask)
+
+    smooth = ndi.gaussian_filter(mask.astype(np.float32), sigma=0.8)
+    mask = smooth >= 0.48
+    mask = keep_component_near_center(mask)
+    mask = fill_internal_holes_by_slices(mask)
+    mask = ndi.binary_fill_holes(mask)
 
     metadata = {
         "method": method,
         "threshold": threshold,
         "base_threshold": base_threshold,
-        "peel_iterations": int(peel_iterations),
+        "percentile_threshold": percentile_threshold,
+        "peel_iterations": 0,
+        "fallback_policy": "debug only / not final brain mask",
+        "postprocess": "threshold + centered tissue candidate + largest component + fill holes + closing radius 2 + remove small objects + smoothing",
         "plane": plane,
         "voxels": int(np.count_nonzero(mask)),
         "components": int(measure.label(mask).max()),
