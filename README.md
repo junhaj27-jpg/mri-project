@@ -1,28 +1,61 @@
 # AIDLC-MRI
 
-Brain MRI 2D/3D viewer MVP for portfolio and research visualization.
+Local-first C-MRI 2D/3D viewer for portfolio and research-style visualization.
 
-This project loads local DICOM MRI data, provides a 2D slice viewer, displays brain-mask overlays, and offers a 3D preview pipeline when a reliable skull-stripping result is available.
+This project loads local DICOM MRI data, provides a 2D slice viewer, displays brain-mask overlays, and renders a browser-based 3D preview mesh. Final brain-only 3D remains gated behind reliable skull stripping, while fallback/debug masks are clearly labeled as preview-only and not for diagnosis.
 
 > Viewer only. Not for diagnosis. Final medical decisions must follow a clinician's interpretation.
+
+## GitHub About
+
+Suggested repository description:
+
+```text
+Local-first C-MRI 2D/3D viewer with DICOM slice preview, brain-mask overlays, and debug/final 3D mesh workflows.
+```
+
+Suggested topics:
+
+```text
+mri, dicom, medical-imaging, brain-mri, python, pydicom, nifti, trimesh, marching-cubes, threejs, portfolio-project
+```
+
+## Screenshot
+
+![C-MRI 3D Viewer with brain-mask overlay and debug surface preview](docs/screenshots/cmri-3d-viewer-mask-debug-preview.png)
 
 ## Project Summary
 
 AIDLC-MRI is a local-first MRI viewer focused on private brain MRI visualization. It is designed to demonstrate a practical medical-imaging workflow without uploading patient data to an external service.
 
-Core capabilities:
+## Implemented Features
 
 - Load and group local DICOM brain MRI series
 - Preview axial, sagittal, and coronal MRI slices
+- Load selected DICOM series into a backend 3D volume
+- Return 2D slice PNGs from backend MRI slice APIs
 - Convert the selected DICOM volume to NIfTI
+- Display grayscale slices with brain-mask overlay enabled by default
+- Show metadata such as source, shape, spacing, series, mask source, mask ratio, mask unique values, and mask status
+- Generate fallback/debug brain masks when reliable tools are unavailable
+- Generate preview-only debug 3D meshes from fallback masks with explicit warnings
+- Export debug preview meshes to `frontend/static/meshes/debug_brain_preview.glb`
+- Render debug preview meshes as solid surface previews in the 3D Viewer
+- Keep final 3D mesh generation disabled until a reliable mask is available
 - Run reliable skull stripping with HD-BET or SynthStrip when available
-- Run atlas/parcellation-based region segmentation with SynthSeg or FastSurfer label maps
 - Display binary brain-mask overlays only on `mask == true` pixels
+- Render a 3D preview in the browser and show explicit status messages when mesh generation or GLB loading is unavailable or fails
+
+## Experimental / Preview Features
+
+- Debug mask generation from threshold/largest-component fallback logic
+- Debug 3D preview mesh for portfolio/demo use only
+- Canvas solid-surface fallback when external Three.js modules cannot be loaded
+- Atlas/parcellation-based region segmentation with SynthSeg or FastSurfer label maps
 - Display region label overlays with separate colors for cerebrum, cerebellum, brainstem, ventricles, hippocampus, basal ganglia, thalamus, white matter, and gray matter
 - Generate final brain-only 3D mesh only from `outputs/brain_mask.nii.gz`
 - Generate selected-region 3D meshes only from `outputs/regions_labelmap.nii.gz`
-- Block final 3D output when only fallback/threshold/debug masks are available
-- Render a 3D preview in the browser and show explicit status messages when mesh generation is unavailable or fails
+- Region volume export and selected-region 3D mesh workflows
 
 ## Tech Stack
 
@@ -38,7 +71,8 @@ Core capabilities:
 | Brain extraction | HD-BET, optional SynthStrip / FreeSurfer |
 | Region segmentation | SynthSeg label maps, optional FastSurfer label maps |
 | 3D mesh generation | `skimage.measure.marching_cubes`, `trimesh` |
-| 3D browser preview | Plotly `Mesh3d` embedded in the 3D Viewer |
+| 3D browser preview | Three.js `GLTFLoader` for GLB surface meshes, with a local canvas surface fallback when external modules are unavailable |
+| Legacy/debug mesh plot | Plotly `Mesh3d` remains available through `/api/mesh_plot` |
 | Reports / documents | `reportlab` |
 | Version control | Git, GitHub |
 | OS target | Windows PowerShell local workflow |
@@ -60,6 +94,12 @@ Selected DICOM series
     -> marching cubes on binary brain mask
     -> outputs/brain_only_mesh.glb
     -> /three-d preview
+
+Debug preview path
+    -> fallback/debug brain mask
+    -> marching cubes on binary debug mask
+    -> frontend/static/meshes/debug_brain_preview.glb
+    -> /three-d preview with Preview only / Not for diagnosis warning
 
 Region segmentation
     -> SynthSeg or FastSurfer label map
@@ -85,7 +125,7 @@ The 3D pipeline is intentionally conservative:
 7. Build final 3D mesh only from `brain_mask.astype(float)` with `marching_cubes(level=0.5)`.
 8. Export final mesh to `outputs/brain_only_mesh.glb`.
 
-Fallback threshold masks are allowed only for debugging. They are marked as `debug_only` or `invalid_threshold_noise` and can create only `outputs/debug_mask_mesh.glb`, not final `brain_only_mesh.glb`.
+Fallback threshold masks are allowed only for debugging and portfolio/demo preview. They are marked as `debug_only` or `invalid_threshold_noise` and can create `frontend/static/meshes/debug_brain_preview.glb` for preview-only rendering. They cannot create final `brain_only_mesh.glb`.
 
 ## 3D Viewer Reliability Rules
 
@@ -99,15 +139,18 @@ reliable_mask = (
 )
 ```
 
-If this condition is false, the 3D Viewer shows a clear status message instead of a blank white preview:
+If this condition is false, final 3D generation remains disabled. The 3D Viewer can still generate a clearly labeled debug preview mesh when a fallback/debug mask exists:
 
 - `No mesh generated yet`
-- `Brain mask is debug only. Final 3D disabled.`
+- `Preview mesh not generated yet. Click Generate Preview 3D.`
+- `Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.`
 - `Building 3D mesh...`
-- `3D mesh loaded`
+- `GLB surface mesh ready`
+- `Canvas surface fallback ready`
+- `GLB load failed`
 - `Mesh generation failed: {error}`
 
-This prevents threshold noise, skull/scalp/neck tissue, ellipse ROI masks, or unknown cached masks from being presented as final brain-only 3D results.
+This prevents threshold noise, skull/scalp/neck tissue, ellipse ROI masks, or unknown cached masks from being presented as final brain-only 3D results. Debug preview meshes are always labeled `Preview only` and `Not for diagnosis`.
 
 ## Region Segmentation / Parcellation
 
@@ -265,12 +308,21 @@ The local web frontend uses these endpoints:
 - `GET /api/studies`
 - `GET /api/load`
 - `GET /api/slice`
+- `GET /api/mri/metadata`
+- `GET /api/mri/slice`
+- `GET /api/mri/slice/{plane}`
+- `GET /api/slice-info`
 - `GET /api/mask`
 - `GET /api/rebuild_mask`
 - `GET /api/clear_outputs`
 - `GET /api/run_hdbet`
 - `GET /api/mesh`
 - `GET /api/mesh_plot`
+- `GET /api/mri/mesh/debug-preview`
+- `POST /api/mri/mesh/debug-preview`
+- `GET /api/mri/mesh/debug-preview/status`
+- `GET /api/threejs_viewer`
+- `GET /api/mesh-status`
 - `GET /api/tracking`
 - `GET /api/volume-result`
 - `GET /api/ai-results`
@@ -389,6 +441,8 @@ outputs/debug_mask_overlay.png
 outputs/debug_mask_overlay_axial.png
 outputs/debug_mask_overlay_sagittal.png
 outputs/debug_mask_overlay_coronal.png
+frontend/static/meshes/debug_brain_preview.glb
+frontend/static/meshes/debug_brain_preview.json
 ```
 
 These debug outputs are not final brain extraction results.
@@ -407,6 +461,7 @@ skull_stripping.py        SynthStrip/HD-BET integration helpers
 mesh_builder.py           Marching cubes and mesh export
 report.py                 PDF report helpers
 frontend/                 Dashboard, viewer, 3D, studies, volume, AI pages
+docs/screenshots/         README screenshots
 utils/                    DICOM helper loader
 outputs/                  Generated masks and meshes
 ```
@@ -418,9 +473,14 @@ Recent local verification:
 - `/studies` loads DICOM series rows.
 - `/volume` renders T01 to T14 mock tracking rows.
 - `/ai` renders mask/mesh readiness checks.
-- `/viewer` keeps the 2D grayscale slice workflow.
-- `/three-d` runs HD-BET from the project virtualenv, saves `outputs/brain_mask.nii.gz`, and builds `outputs/brain_only_mesh.glb` only when `reliable_mask=true`.
-- Threshold fallback remains `invalid_threshold_noise` / debug-only and cannot create final 3D output.
+- `/viewer` loads backend PNG slices and shows brain-mask overlay by default.
+- `/api/mri/metadata` returns volume shape and spacing.
+- `/api/mri/slice?plane=sagittal&overlay=true` returns `image/png`.
+- `/api/mri/mesh/debug-preview` generates `frontend/static/meshes/debug_brain_preview.glb`.
+- `/static/meshes/debug_brain_preview.glb` returns `200` with `Content-Type: model/gltf-binary`.
+- `/three-d` shows the masked slice preview and a solid debug 3D surface preview.
+- Final 3D remains disabled unless `reliable_mask=true`.
+- Threshold fallback remains `invalid_threshold_noise` / debug-only and cannot create final medical brain-only 3D output.
 
 ## Docker
 
