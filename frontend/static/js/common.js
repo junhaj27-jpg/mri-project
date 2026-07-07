@@ -1,6 +1,10 @@
 async function apiGet(url) {
   const response = await fetch(url, { cache: "no-store" });
   const data = await response.json();
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Login required");
+  }
   if (!response.ok || data.error) {
     throw new Error(data.error || response.statusText);
   }
@@ -41,3 +45,46 @@ function planeLength(shape, plane) {
   if (plane === "coronal") return shape[1];
   return shape[0];
 }
+
+async function hydrateAuthMenu() {
+  const menu = document.querySelector(".menu");
+  if (!menu) return;
+  try {
+    const session = await apiGet("/api/auth/session");
+    if (!menu.querySelector('a[href="/guide"]')) {
+      const guideLink = document.createElement("a");
+      guideLink.href = "/guide";
+      guideLink.textContent = "Guide";
+      if (window.location.pathname === "/guide") {
+        guideLink.className = "active";
+      }
+      menu.appendChild(guideLink);
+    }
+    if (session.user?.role === "admin" && !menu.querySelector('a[href="/admin"]')) {
+      const adminLink = document.createElement("a");
+      adminLink.href = "/admin";
+      adminLink.textContent = "Admin";
+      menu.appendChild(adminLink);
+    }
+    const userBadge = document.createElement("span");
+    userBadge.className = "user-chip";
+    userBadge.textContent = session.user?.display_name || session.user?.username || "User";
+    menu.appendChild(userBadge);
+
+    const logoutButton = document.createElement("button");
+    logoutButton.className = "nav-button";
+    logoutButton.type = "button";
+    logoutButton.textContent = "Logout";
+    logoutButton.addEventListener("click", async () => {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/login";
+    });
+    menu.appendChild(logoutButton);
+  } catch (error) {
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
+}
+
+hydrateAuthMenu();

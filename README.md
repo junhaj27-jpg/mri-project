@@ -20,9 +20,24 @@ Suggested topics:
 mri, dicom, medical-imaging, brain-mri, python, pydicom, nifti, trimesh, marching-cubes, threejs, portfolio-project
 ```
 
-## Screenshot
+## Screenshots
 
 ![C-MRI 3D Viewer with brain-mask overlay and debug surface preview](docs/screenshots/cmri-3d-viewer-mask-debug-preview.png)
+
+### Page Gallery
+
+| Page | Screenshot |
+| --- | --- |
+| Login | ![AIDLC-MRI login page](docs/screenshots/login-page.png) |
+| Dashboard | ![AIDLC-MRI dashboard page](docs/screenshots/dashboard-page.png) |
+| Authenticated dashboard | ![AIDLC-MRI authenticated dashboard page](docs/screenshots/dashboard-authenticated-page.png) |
+| Studies | ![AIDLC-MRI DICOM studies page](docs/screenshots/studies-page.png) |
+| 2D Viewer | ![AIDLC-MRI 2D viewer page with brain mask overlay](docs/screenshots/two-d-viewer-page.png) |
+| Volume | ![AIDLC-MRI volume summary page](docs/screenshots/volume-page.png) |
+| 3D Viewer | ![AIDLC-MRI 3D viewer page](docs/screenshots/three-d-viewer-page.png) |
+| AI Assist | ![AIDLC-MRI AI assist page](docs/screenshots/ai-assist-page.png) |
+| Guide | ![AIDLC-MRI guide page](docs/screenshots/guide-page.png) |
+| Admin users | ![AIDLC-MRI admin user management page](docs/screenshots/admin-users-page.png) |
 
 ## Project Summary
 
@@ -225,12 +240,15 @@ The app scans this folder recursively and groups DICOM files by series.
 
 ## Main Screens
 
+- Login: local account sign-in before accessing MRI data
 - Dashboard: project overview and quick links
 - Studies: DICOM series list grouped into study-style rows
 - 2D Viewer: grayscale MRI slice viewer with plane and slice controls
 - Volume: mock longitudinal volume tracking plus current brain-mask volume summary
 - 3D Viewer: brain mesh preview based on available brain mask
 - AI Assist: skull-stripping, mask, mesh, and overlay status summary
+- Guide: Korean usage guide for the viewer workflow
+- Admin: administrator-only user creation and account overview
 
 ## Local Web App
 
@@ -249,11 +267,14 @@ http://127.0.0.1:8000
 Useful pages:
 
 ```text
+http://127.0.0.1:8000/login
 http://127.0.0.1:8000/studies
 http://127.0.0.1:8000/viewer
 http://127.0.0.1:8000/volume
 http://127.0.0.1:8000/three-d
 http://127.0.0.1:8000/ai
+http://127.0.0.1:8000/guide
+http://127.0.0.1:8000/admin
 ```
 
 See [COMMANDS.md](COMMANDS.md) for a compact command reference.

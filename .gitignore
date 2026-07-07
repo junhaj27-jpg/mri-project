@@ -6,6 +6,7 @@ __pycache__/
 data/raw/*
 data/processed/*
 data/reports/*
+data/auth/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/reports/.gitkeep

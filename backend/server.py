@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import io
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import mimetypes
+import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +15,8 @@ import traceback
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from http import cookies
+from secrets import token_urlsafe
 from urllib.parse import parse_qs, urlparse
 
 import matplotlib
@@ -54,6 +60,10 @@ FRONTEND_DIR = ROOT / "frontend"
 STATIC_MESH_DIR = FRONTEND_DIR / "static" / "meshes"
 DEFAULT_DATA_DIR = Path(r"C:\Users\user\Desktop\mri2\mri-project-main\data")
 OUTPUT_DIR = ROOT / "outputs"
+AUTH_DIR = ROOT / "data" / "auth"
+USERS_PATH = AUTH_DIR / "users.json"
+SESSION_COOKIE_NAME = "aidlc_session"
+SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 MASK_PATH = OUTPUT_DIR / "filled_brain_mask.nii.gz"
 RAW_MASK_PATH = OUTPUT_DIR / "brain_mask.nii.gz"
 PROCESSED_MASK_PATH = ROOT / "data" / "processed" / "brain_mask.nii.gz"
@@ -96,6 +106,8 @@ STATE: dict[str, object] = {
     "last_hdbet_command": "",
 }
 
+SESSIONS: dict[str, dict[str, object]] = {}
+
 
 def json_default(value):
     if isinstance(value, Path):
@@ -107,15 +119,162 @@ def json_default(value):
     return str(value)
 
 
+def now_timestamp() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt_bytes = base64.b64decode(salt.encode("ascii")) if salt else os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, 120_000)
+    return (
+        "pbkdf2_sha256$120000$"
+        + base64.b64encode(salt_bytes).decode("ascii")
+        + "$"
+        + base64.b64encode(digest).decode("ascii")
+    )
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algorithm, iterations, salt, digest = stored_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256" or iterations != "120000":
+            return False
+        expected = hash_password(password, salt).rsplit("$", 1)[-1]
+        return hmac.compare_digest(expected, digest)
+    except ValueError:
+        return False
+
+
+def default_user_store() -> dict:
+    return {
+        "users": [
+            {
+                "username": "admin",
+                "display_name": "Administrator",
+                "role": "admin",
+                "password_hash": hash_password("admin1234"),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+    }
+
+
+def load_users() -> dict:
+    if not USERS_PATH.exists():
+        AUTH_DIR.mkdir(parents=True, exist_ok=True)
+        store = default_user_store()
+        USERS_PATH.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+        return store
+    return json.loads(USERS_PATH.read_text(encoding="utf-8"))
+
+
+def save_users(store: dict) -> None:
+    AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    USERS_PATH.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def public_user(user: dict) -> dict:
+    return {
+        "username": user["username"],
+        "display_name": user.get("display_name") or user["username"],
+        "role": user.get("role", "user"),
+        "created_at": user.get("created_at", ""),
+    }
+
+
+def find_user(username: str) -> dict | None:
+    username = username.strip().lower()
+    for user in load_users().get("users", []):
+        if user.get("username", "").lower() == username:
+            return user
+    return None
+
+
+def create_session(user: dict) -> str:
+    token = token_urlsafe(32)
+    SESSIONS[token] = {
+        "username": user["username"],
+        "role": user.get("role", "user"),
+        "expires_at": now_timestamp() + SESSION_MAX_AGE_SECONDS,
+    }
+    return token
+
+
+def get_session_user_from_headers(headers) -> dict | None:
+    raw_cookie = headers.get("Cookie", "")
+    jar = cookies.SimpleCookie()
+    jar.load(raw_cookie)
+    morsel = jar.get(SESSION_COOKIE_NAME)
+    if not morsel:
+        return None
+    token = morsel.value
+    session = SESSIONS.get(token)
+    if not session:
+        return None
+    if float(session.get("expires_at", 0)) < now_timestamp():
+        SESSIONS.pop(token, None)
+        return None
+    user = find_user(str(session.get("username", "")))
+    if not user:
+        SESSIONS.pop(token, None)
+        return None
+    return user
+
+
+def clear_session_from_headers(headers) -> None:
+    raw_cookie = headers.get("Cookie", "")
+    jar = cookies.SimpleCookie()
+    jar.load(raw_cookie)
+    morsel = jar.get(SESSION_COOKIE_NAME)
+    if morsel:
+        SESSIONS.pop(morsel.value, None)
+
+
 class BackendHandler(BaseHTTPRequestHandler):
     server_version = "AIDLCMRI/0.1"
+
+    PUBLIC_GET_PATHS = {"/login", "/health"}
+    PUBLIC_POST_PATHS = {"/api/auth/login"}
+
+    def current_user(self) -> dict | None:
+        return get_session_user_from_headers(self.headers)
+
+    def is_public_get(self, path: str) -> bool:
+        return path in self.PUBLIC_GET_PATHS or path.startswith("/static/") or path.startswith("/assets/")
+
+    def require_auth(self, path: str) -> dict | None:
+        user = self.current_user()
+        if user:
+            return user
+        if path.startswith("/api/"):
+            self.send_json({"error": "Login required"}, status=401)
+        else:
+            self.redirect("/login")
+        return None
+
+    def require_admin(self) -> dict | None:
+        user = self.require_auth(urlparse(self.path).path)
+        if not user:
+            return None
+        if user.get("role") != "admin":
+            self.send_json({"error": "Admin permission required"}, status=403)
+            return None
+        return user
 
     def do_GET(self) -> None:
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             query = parse_qs(parsed.query)
-            if path == "/":
+            if not self.is_public_get(path) and not self.require_auth(path):
+                return
+
+            if path == "/login":
+                if self.current_user():
+                    self.redirect("/")
+                else:
+                    self.send_static(FRONTEND_DIR / "login.html")
+            elif path == "/":
                 self.send_static(FRONTEND_DIR / "index.html")
             elif path == "/viewer":
                 self.send_static(FRONTEND_DIR / "viewer.html")
@@ -129,6 +288,12 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_static(FRONTEND_DIR / "volume.html")
             elif path == "/ai":
                 self.send_static(FRONTEND_DIR / "ai.html")
+            elif path == "/guide":
+                self.send_static(FRONTEND_DIR / "guide.html")
+            elif path == "/admin":
+                if not self.require_admin():
+                    return
+                self.send_static(FRONTEND_DIR / "admin.html")
             elif path.startswith("/assets/"):
                 self.send_static(FRONTEND_DIR / path.removeprefix("/"))
             elif path.startswith("/static/"):
@@ -137,6 +302,13 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_output_file(path)
             elif path == "/health":
                 self.send_json({"status": "ok", "project": "aidlc-mri"})
+            elif path == "/api/auth/session":
+                self.send_json({"authenticated": True, "user": public_user(self.current_user())})
+            elif path == "/api/admin/users":
+                if not self.require_admin():
+                    return
+                users = [public_user(user) for user in load_users().get("users", [])]
+                self.send_json({"users": users})
             elif path == "/api/project-summary":
                 self.send_json(api_project_summary())
             elif path == "/api/status":
@@ -224,7 +396,19 @@ class BackendHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            if parsed.path in {"/api/clear-outputs", "/api/clear_outputs"}:
+            if parsed.path not in self.PUBLIC_POST_PATHS and not self.require_auth(parsed.path):
+                return
+
+            if parsed.path == "/api/auth/login":
+                self.handle_login()
+            elif parsed.path == "/api/auth/logout":
+                clear_session_from_headers(self.headers)
+                self.send_json({"ok": True}, clear_session=True)
+            elif parsed.path == "/api/admin/users":
+                if not self.require_admin():
+                    return
+                self.handle_create_user()
+            elif parsed.path in {"/api/clear-outputs", "/api/clear_outputs"}:
                 self.send_json(api_clear_outputs())
             elif parsed.path in {"/api/run-hdbet", "/api/run_hdbet"}:
                 self.send_json(api_run_hdbet())
@@ -258,9 +442,84 @@ class BackendHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         LOGGER.info("%s - %s", self.address_string(), fmt % args)
 
-    def send_json(self, payload: dict | list) -> None:
+    def read_json_body(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+    def handle_login(self) -> None:
+        body = self.read_json_body()
+        username = str(body.get("username", "")).strip()
+        password = str(body.get("password", ""))
+        user = find_user(username)
+        if not user or not verify_password(password, str(user.get("password_hash", ""))):
+            self.send_json({"error": "Invalid username or password"}, status=401)
+            return
+        token = create_session(user)
+        self.send_json({"ok": True, "user": public_user(user)}, session_token=token)
+
+    def handle_create_user(self) -> None:
+        body = self.read_json_body()
+        username = str(body.get("username", "")).strip().lower()
+        display_name = str(body.get("display_name", "")).strip() or username
+        role = str(body.get("role", "user")).strip().lower()
+        password = str(body.get("password", ""))
+        if not username or not username.replace("_", "").replace("-", "").isalnum():
+            self.send_json({"error": "Username must use letters, numbers, hyphen, or underscore."}, status=400)
+            return
+        if role not in {"user", "admin"}:
+            self.send_json({"error": "Role must be user or admin."}, status=400)
+            return
+        if len(password) < 8:
+            self.send_json({"error": "Password must be at least 8 characters."}, status=400)
+            return
+        store = load_users()
+        if any(user.get("username", "").lower() == username for user in store.get("users", [])):
+            self.send_json({"error": "Username already exists."}, status=409)
+            return
+        user = {
+            "username": username,
+            "display_name": display_name,
+            "role": role,
+            "password_hash": hash_password(password),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        store.setdefault("users", []).append(user)
+        save_users(store)
+        self.send_json({"ok": True, "user": public_user(user)}, status=201)
+
+    def redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def send_json(
+        self,
+        payload: dict | list,
+        status: int = 200,
+        session_token: str | None = None,
+        clear_session: bool = False,
+    ) -> None:
         data = json.dumps(payload, ensure_ascii=False, default=json_default).encode("utf-8")
-        self.send_bytes(data, "application/json; charset=utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        if session_token:
+            self.send_header(
+                "Set-Cookie",
+                f"{SESSION_COOKIE_NAME}={session_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE_SECONDS}",
+            )
+        if clear_session:
+            self.send_header(
+                "Set-Cookie",
+                f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+            )
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_bytes(self, data: bytes, content_type: str) -> None:
         self.send_response(200)

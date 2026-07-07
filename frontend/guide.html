@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI Guide</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/studies">Studies</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/volume">Volume</a>
+      <a href="/three-d">3D Viewer</a>
+      <a href="/ai">AI Assist</a>
+      <a href="/guide" class="active">Guide</a>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card">
+    <span class="badge green">Guide</span>
+    <h1>AIDLC-MRI 사용 설명</h1>
+    <p class="lead">이 페이지는 로그인한 사용자가 MRI viewer의 전체 흐름을 빠르게 이해할 수 있도록 만든 안내 화면입니다.</p>
+    <p class="notice">Viewer only. Not for diagnosis. 의료 판단은 반드시 전문 의료진의 판독을 따라야 합니다.</p>
+  </section>
+
+  <section class="grid two guide-grid">
+    <article class="card">
+      <span class="badge">1</span>
+      <h2>로그인과 계정</h2>
+      <p>관리자가 만든 계정으로만 접속할 수 있습니다. 관리자는 Admin 화면에서 사용자 계정을 만들고, 일반 사용자는 생성된 아이디와 임시 비밀번호로 로그인합니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/admin">Admin 열기</a>
+      </div>
+    </article>
+
+    <article class="card">
+      <span class="badge">2</span>
+      <h2>Studies</h2>
+      <p>로컬 data 폴더의 DICOM 파일을 series 단위로 정리해서 보여줍니다. 원하는 series를 확인한 뒤 2D Viewer 또는 3D Viewer에서 불러올 수 있습니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/studies">Studies 열기</a>
+      </div>
+    </article>
+
+    <article class="card">
+      <span class="badge">3</span>
+      <h2>2D Viewer</h2>
+      <p>Axial, sagittal, coronal 방향으로 MRI slice를 확인합니다. mask overlay를 켜면 brain mask가 적용된 영역을 함께 볼 수 있습니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/viewer">2D Viewer 열기</a>
+      </div>
+    </article>
+
+    <article class="card">
+      <span class="badge">4</span>
+      <h2>3D Viewer</h2>
+      <p>유효한 brain mask가 있을 때 3D surface mesh를 생성하고 미리 봅니다. fallback mask는 preview 전용이며 최종 의료용 결과로 보지 않습니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/three-d">3D Viewer 열기</a>
+      </div>
+    </article>
+
+    <article class="card">
+      <span class="badge">5</span>
+      <h2>Volume</h2>
+      <p>현재 brain mask의 voxel, mm3, ml 단위 요약을 확인합니다. demo tracking 값은 포트폴리오/시각화 예시용입니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/volume">Volume 열기</a>
+      </div>
+    </article>
+
+    <article class="card">
+      <span class="badge">6</span>
+      <h2>AI Assist</h2>
+      <p>skull stripping, mask, mesh, overlay 상태를 한 번에 점검합니다. 문제가 있으면 어떤 단계가 준비되지 않았는지 확인하는 화면입니다.</p>
+      <div class="actions">
+        <a class="btn secondary" href="/ai">AI Assist 열기</a>
+      </div>
+    </article>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI Login</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="auth-body">
+<main class="auth-shell">
+  <section class="card auth-card">
+    <span class="badge">Secure Access</span>
+    <h1>AIDLC-MRI Login</h1>
+    <p>관리자가 생성한 계정으로만 MRI viewer에 접근할 수 있습니다.</p>
+    <form id="loginForm" class="auth-form">
+      <label>
+        Username
+        <input id="usernameInput" name="username" autocomplete="username" required>
+      </label>
+      <label>
+        Password
+        <input id="passwordInput" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Login</button>
+      <p id="loginMessage" class="notice" role="alert"></p>
+    </form>
+    <div class="auth-hint">
+      <strong>Default admin</strong>
+      <span>admin / admin1234</span>
+    </div>
+  </section>
+</main>
+
+<script src="/static/js/auth.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AIDLC-MRI Admin</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header class="header">
+  <nav class="nav">
+    <a class="brand" href="/">AIDLC-MRI</a>
+    <div class="menu">
+      <a href="/">Dashboard</a>
+      <a href="/studies">Studies</a>
+      <a href="/viewer">2D Viewer</a>
+      <a href="/volume">Volume</a>
+      <a href="/three-d">3D Viewer</a>
+      <a href="/ai">AI Assist</a>
+      <a href="/admin" class="active">Admin</a>
+    </div>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card">
+    <span class="badge green">Admin</span>
+    <h1>User management</h1>
+    <p>관리자가 사용자 계정을 생성하면, 해당 계정으로만 MRI viewer에 로그인할 수 있습니다.</p>
+  </section>
+
+  <section class="grid two">
+    <div class="card">
+      <h2>Create user</h2>
+      <form id="createUserForm" class="auth-form">
+        <label>
+          Username
+          <input id="newUsername" autocomplete="off" required>
+        </label>
+        <label>
+          Display name
+          <input id="newDisplayName" autocomplete="off">
+        </label>
+        <label>
+          Role
+          <select id="newRole">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          Temporary password
+          <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <button type="submit">Create account</button>
+        <p id="createUserMessage" class="notice" role="alert"></p>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Users</h2>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/js/common.js"></script>
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
