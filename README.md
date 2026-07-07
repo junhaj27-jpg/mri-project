@@ -6,6 +6,97 @@ This project loads local DICOM MRI data, provides a 2D slice viewer, displays br
 
 > Viewer only. Not for diagnosis. Final medical decisions must follow a clinician's interpretation.
 
+## Project Summary
+
+AIDLC-MRI is a local-first MRI viewer focused on private brain MRI visualization. It is designed to demonstrate a practical medical-imaging workflow without uploading patient data to an external service.
+
+Core capabilities:
+
+- Load and group local DICOM brain MRI series
+- Preview axial, sagittal, and coronal MRI slices
+- Convert the selected DICOM volume to NIfTI
+- Run reliable skull stripping with HD-BET or SynthStrip when available
+- Display binary brain-mask overlays only on `mask == true` pixels
+- Generate final brain-only 3D mesh only from `outputs/brain_mask.nii.gz`
+- Block final 3D output when only fallback/threshold/debug masks are available
+- Render a 3D preview in the browser and show explicit status messages when mesh generation is unavailable or fails
+
+## Tech Stack
+
+| Area | Technologies |
+| --- | --- |
+| Language | Python 3.12, JavaScript, HTML, CSS |
+| Local backend | Python `http.server` via `ThreadingHTTPServer` |
+| MVP UI | Streamlit |
+| Web frontend | Vanilla HTML/CSS/JavaScript |
+| DICOM loading | `pydicom` |
+| NIfTI I/O | `nibabel` |
+| Image processing | `numpy`, `scipy`, `scikit-image` |
+| Brain extraction | HD-BET, optional SynthStrip / FreeSurfer |
+| 3D mesh generation | `skimage.measure.marching_cubes`, `trimesh` |
+| 3D browser preview | Plotly `Mesh3d` embedded in the 3D Viewer |
+| Reports / documents | `reportlab` |
+| Version control | Git, GitHub |
+| OS target | Windows PowerShell local workflow |
+
+## Architecture Overview
+
+```text
+Local DICOM data
+    -> mri_loader.py
+    -> backend/server.py API
+    -> frontend/*.html + frontend/static/js
+    -> 2D slice preview / mask overlay / 3D preview
+
+Selected DICOM series
+    -> outputs/input.nii.gz
+    -> HD-BET or SynthStrip
+    -> outputs/brain_mask.nii.gz
+    -> outputs/brain_only.nii.gz
+    -> marching cubes on binary brain mask
+    -> outputs/brain_only_mesh.glb
+    -> /three-d preview
+```
+
+The project keeps the local backend and frontend intentionally simple. The main web app is served by `backend/server.py`; the original Streamlit MVP remains available in `app.py`.
+
+## Brain Mask And 3D Pipeline
+
+The 3D pipeline is intentionally conservative:
+
+1. Load selected DICOM series.
+2. Save the current volume as `outputs/input.nii.gz`.
+3. Try reliable skull stripping with SynthStrip or HD-BET.
+4. Save the reliable binary mask as `outputs/brain_mask.nii.gz`.
+5. Save `outputs/brain_only.nii.gz` as `original_volume * brain_mask`.
+6. Render 2D overlays only where `brain_mask > 0.5`.
+7. Build final 3D mesh only from `brain_mask.astype(float)` with `marching_cubes(level=0.5)`.
+8. Export final mesh to `outputs/brain_only_mesh.glb`.
+
+Fallback threshold masks are allowed only for debugging. They are marked as `debug_only` or `invalid_threshold_noise` and can create only `outputs/debug_mask_mesh.glb`, not final `brain_only_mesh.glb`.
+
+## 3D Viewer Reliability Rules
+
+Final 3D generation is enabled only when:
+
+```python
+reliable_mask = (
+    mask_source in ["synthstrip", "hd-bet", "cached_brain_mask"]
+    and mask_status == "valid"
+    and outputs/brain_mask.nii.gz exists
+)
+```
+
+If this condition is false, the 3D Viewer shows a clear status message instead of a blank white preview:
+
+- `No mesh generated yet`
+- `Brain mask is debug only. Final 3D disabled.`
+- `Building 3D mesh...`
+- `3D mesh loaded`
+- `Mesh generation failed: {error}`
+
+This prevents threshold noise, skull/scalp/neck tissue, ellipse ROI masks, or unknown cached masks from being presented as final brain-only 3D results.
+
 ## Current Data Path
 
 The default local data folder is:
@@ -131,7 +222,7 @@ Simple threshold fallback is debug-only. It must not be treated as final brain-o
 
 The app treats a mask as reliable only when all of these are true:
 
-- `mask_source` is `synthstrip` or `hd-bet`
+- `mask_source` is `synthstrip`, `hd-bet`, or `cached_brain_mask`
 - `mask_status` is `valid`
 - `outputs/brain_mask.nii.gz` exists
 - `reliable_mask` is `true`
