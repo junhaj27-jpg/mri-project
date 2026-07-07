@@ -149,6 +149,11 @@ button:hover {
   background: var(--primary-dark);
   color: #fff;
 }
+.btn.disabled,
+.btn[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.48;
+}
 button:disabled {
   cursor: wait;
   opacity: 0.62;
@@ -203,6 +208,31 @@ label {
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
+}
+.mesh-state-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+.mesh-state-panel div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px;
+}
+.mesh-state-panel span {
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 800;
+}
+.mesh-state-panel strong {
+  overflow: hidden;
+  color: #431407;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .status-list {
   display: grid;
@@ -289,6 +319,7 @@ label {
   min-width: 140px;
 }
 .clinical-image-stage {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -303,6 +334,42 @@ label {
   max-width: 100%;
   max-height: 720px;
   object-fit: contain;
+}
+.slice-debug-panel {
+  position: absolute;
+  inset: 24px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 14px;
+  max-width: 720px;
+  margin: auto;
+  padding: 22px;
+  border: 1px solid rgba(159, 42, 42, 0.34);
+  border-radius: 8px;
+  background: #fff7f7;
+  color: #3b1414;
+}
+.slice-debug-panel.hidden {
+  display: none;
+}
+.slice-debug-panel strong {
+  font-size: 18px;
+}
+.slice-debug-panel dl {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px 12px;
+  width: 100%;
+  margin: 0;
+}
+.slice-debug-panel dt {
+  color: var(--danger);
+  font-weight: 800;
+}
+.slice-debug-panel dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .three-workspace {
   display: grid;
@@ -361,6 +428,7 @@ label {
   white-space: nowrap;
 }
 .real-slice-frame {
+  position: relative;
   display: grid;
   min-height: 260px;
   place-items: center;
@@ -373,6 +441,15 @@ label {
   max-width: 100%;
   max-height: 340px;
   object-fit: contain;
+}
+.real-slice-frame .slice-debug-panel {
+  inset: 12px;
+  max-width: none;
+  padding: 16px;
+  font-size: 12px;
+}
+.real-slice-frame .slice-debug-panel dl {
+  grid-template-columns: 104px minmax(0, 1fr);
 }
 .slice-toolbar {
   display: grid;

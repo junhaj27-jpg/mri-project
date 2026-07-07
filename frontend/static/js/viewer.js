@@ -1,8 +1,12 @@
 const viewerState = {
   status: null,
+  metadata: null,
   series: [],
+  sliceLoaded: false,
+  activeObjectUrl: "",
 };
 
+const API_BASE = "";
 const $ = (id) => document.getElementById(id);
 
 async function loadSeriesList() {
@@ -19,11 +23,19 @@ async function loadSeriesList() {
 
 async function refreshStatus() {
   const status = await apiGet("/api/status");
+  const metadata = await apiGet("/api/mri/metadata");
   viewerState.status = status;
-  $("sourceText").textContent = status.source || "-";
-  $("shapeText").textContent = formatShape(status.shape);
-  $("spacingText").textContent = formatSpacing(status.spacing);
-  $("seriesText").textContent = status.info?.SeriesDescription || status.source_label || "-";
+  viewerState.metadata = metadata;
+  $("sourceText").textContent = metadata.source || status.source || "-";
+  $("shapeText").textContent = formatShape(metadata.shape || status.shape);
+  $("spacingText").textContent = formatSpacing(metadata.spacing || status.spacing);
+  $("seriesText").textContent = metadata.series || status.info?.SeriesDescription || status.source_label || "-";
+  $("maskSourceText").textContent = metadata.mask_source || status.mask_source || "none";
+  $("maskRatioText").textContent = String(metadata.mask_ratio ?? status.mask_ratio ?? "-");
+  $("maskUniqueText").textContent = Array.isArray(metadata.mask_unique_values)
+    ? metadata.mask_unique_values.join(", ")
+    : "-";
+  $("maskStatusText").textContent = metadata.mask_status || status.mask_status || "missing";
   const region = status.region_segmentation || {};
   $("regionStatusText").textContent = region.status || "missing";
   $("regionLabelmapText").textContent = region.labelmap_path || "-";
@@ -36,8 +48,8 @@ async function loadVolume() {
   try {
     const key = encodeURIComponent($("seriesSelect").value);
     await apiGet(`/api/load?series_key=${key}`);
-    await refreshStatus();
     resetMaskStatus();
+    await refreshStatus();
     await refreshSlice();
   } finally {
     setBusy(false);
@@ -62,14 +74,93 @@ async function refreshSlice() {
   const index = Number($("sliceRange").value);
   const mask = $("maskToggle").value;
   const overlayType = $("overlayTypeSelect").value;
+  const region = $("regionSelect").value;
   $("sliceTitle").textContent = `${plane.charAt(0).toUpperCase()}${plane.slice(1)} slice`;
+  $("open3dLink").classList.add("disabled");
+  $("open3dLink").setAttribute("aria-disabled", "true");
+  viewerState.sliceLoaded = false;
+
+  const params = new URLSearchParams({
+    plane,
+    index: String(index),
+    region,
+    t: String(Date.now()),
+  });
   if (overlayType === "region_selected" || overlayType === "region_all") {
-    const region = encodeURIComponent($("regionSelect").value);
     const mode = overlayType === "region_all" ? "all" : "selected";
-    $("sliceImage").src = `/api/regions/overlay?plane=${encodeURIComponent(plane)}&index=${index}&region=${region}&mode=${mode}&t=${Date.now()}`;
+    params.set("mode", mode);
+    await loadSliceImage(`${API_BASE}/api/regions/overlay?${params.toString()}`, { plane, index });
   } else {
-    $("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+    params.set("mask", mask);
+    await loadSliceImage(`${API_BASE}/api/mri/slice?${params.toString()}`, { plane, index });
   }
+}
+
+async function loadSliceImage(url, context) {
+  console.log("[MRI viewer] slice image request URL:", url);
+  hideSliceError();
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("image/png")) {
+      const message = await response.text();
+      showSliceError({
+        url,
+        status: `${response.status} ${response.statusText}`,
+        message: message || `Unexpected content type: ${contentType || "empty"}`,
+        plane: context.plane,
+        index: context.index,
+      });
+      return;
+    }
+    const blob = await response.blob();
+    if (viewerState.activeObjectUrl) URL.revokeObjectURL(viewerState.activeObjectUrl);
+    viewerState.activeObjectUrl = URL.createObjectURL(blob);
+    $("sliceImage").onerror = () => {
+      showSliceError({
+        url,
+        status: "image decode failed",
+        message: "Browser could not decode the PNG response.",
+        plane: context.plane,
+        index: context.index,
+      });
+    };
+    $("sliceImage").onload = () => {
+      viewerState.sliceLoaded = true;
+      $("open3dLink").classList.remove("disabled");
+      $("open3dLink").setAttribute("aria-disabled", "false");
+      hideSliceError();
+    };
+    $("sliceImage").src = viewerState.activeObjectUrl;
+  } catch (error) {
+    showSliceError({
+      url,
+      status: "network error",
+      message: error instanceof Error ? error.message : String(error),
+      plane: context.plane,
+      index: context.index,
+    });
+  }
+}
+
+function hideSliceError() {
+  $("sliceErrorPanel").classList.add("hidden");
+  $("sliceImage").style.visibility = "visible";
+}
+
+function showSliceError(details) {
+  const loaded = Boolean(viewerState.metadata?.volume_loaded ?? viewerState.status?.volume_loaded);
+  $("sliceErrorUrl").textContent = details.url || "-";
+  $("sliceErrorStatus").textContent = details.status || "-";
+  $("sliceErrorMessage").textContent = details.message || "-";
+  $("sliceErrorPlane").textContent = details.plane || "-";
+  $("sliceErrorIndex").textContent = String(details.index ?? "-");
+  $("sliceErrorLoaded").textContent = String(loaded);
+  $("sliceImage").removeAttribute("src");
+  $("sliceImage").style.visibility = "hidden";
+  $("sliceErrorPanel").classList.remove("hidden");
+  $("open3dLink").classList.add("disabled");
+  $("open3dLink").setAttribute("aria-disabled", "true");
 }
 
 function resetMaskStatus() {
@@ -99,6 +190,7 @@ async function generateMask() {
     $("largestComponentText").textContent = String(mask.largest_component_ratio ?? "-");
     $("holeRatioText").textContent = String(mask.hole_ratio ?? "-");
     $("edgeLeakageText").textContent = mask.edge_leakage === true ? "yes" : (mask.edge_leakage === false ? "no" : "-");
+    await refreshStatus();
     await refreshSlice();
   } finally {
     setBusy(false);
@@ -124,6 +216,8 @@ function bindViewerControls() {
 }
 
 async function bootViewer() {
+  $("maskToggle").value = "1";
+  $("overlayTypeSelect").value = "brain_mask";
   bindViewerControls();
   setBusy(true);
   try {

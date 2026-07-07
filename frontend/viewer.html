@@ -54,8 +54,8 @@
         <input id="sliceValue" type="number" min="0" max="255" value="127">
         <label>Mask overlay
           <select id="maskToggle">
-            <option value="1">on</option>
             <option value="0">off</option>
+            <option value="1" selected>on</option>
           </select>
         </label>
         <label>Overlay type
@@ -108,17 +108,28 @@
           <p id="disclaimer">Viewer only. Not for diagnosis.</p>
         </div>
         <div class="review-actions single">
-          <a class="btn secondary" href="/three-d">Open 3D</a>
+          <a class="btn secondary disabled" id="open3dLink" href="/three-d" aria-disabled="true">Open 3D</a>
         </div>
       </div>
       <div class="clinical-image-stage">
         <img id="sliceImage" alt="MRI slice">
+        <div class="slice-debug-panel hidden" id="sliceErrorPanel">
+          <strong>Slice image failed to load</strong>
+          <dl>
+            <dt>Request URL</dt><dd id="sliceErrorUrl">-</dd>
+            <dt>HTTP status</dt><dd id="sliceErrorStatus">-</dd>
+            <dt>Backend message</dt><dd id="sliceErrorMessage">-</dd>
+            <dt>Plane</dt><dd id="sliceErrorPlane">-</dd>
+            <dt>Slice index</dt><dd id="sliceErrorIndex">-</dd>
+            <dt>Volume loaded</dt><dd id="sliceErrorLoaded">-</dd>
+          </dl>
+        </div>
       </div>
     </section>
   </section>
 </main>
 
 <script src="/static/js/common.js"></script>
-<script src="/static/js/viewer.js"></script>
+<script src="/static/js/viewer.js?v=mask-overlay-default-on-1"></script>
 </body>
 </html>

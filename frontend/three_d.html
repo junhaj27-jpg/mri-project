@@ -39,6 +39,20 @@
       </div>
       <div class="real-slice-frame">
         <img id="sliceImage" alt="MRI slice preview">
+        <div class="slice-debug-panel hidden" id="sliceErrorPanel">
+          <strong>Slice preview failed to load</strong>
+          <dl>
+            <dt>Requested URL</dt><dd id="sliceErrorUrl">-</dd>
+            <dt>HTTP status</dt><dd id="sliceErrorStatus">-</dd>
+            <dt>Selected series</dt><dd id="sliceErrorSeries">-</dd>
+            <dt>Plane</dt><dd id="sliceErrorPlane">-</dd>
+            <dt>Slice index</dt><dd id="sliceErrorIndex">-</dd>
+            <dt>Overlay</dt><dd id="sliceErrorOverlay">-</dd>
+            <dt>Volume loaded</dt><dd id="sliceErrorLoaded">-</dd>
+            <dt>Mask exists</dt><dd id="sliceErrorMaskExists">-</dd>
+            <dt>Backend error</dt><dd id="sliceErrorMessage">-</dd>
+          </dl>
+        </div>
       </div>
       <div class="slice-toolbar">
         <input id="sliceRange" type="range" min="0" max="255" value="127">
@@ -56,8 +70,8 @@
       </label>
       <label>Mask overlay
         <select id="maskToggle">
-          <option value="1">on</option>
           <option value="0">off</option>
+          <option value="1" selected>on</option>
         </select>
       </label>
       <label>Gaussian sigma
@@ -76,11 +90,26 @@
       <button class="btn secondary" id="rebuildMaskButton" type="button">Rebuild mask</button>
       <button class="btn secondary" id="clearOutputsButton" type="button">Clear outputs</button>
       <button class="btn secondary" id="runHdbetButton" type="button">Run HD-BET</button>
-      <button class="btn" id="meshButton" type="button">Build final 3D mesh</button>
-      <button class="btn secondary" id="debugMeshButton" type="button">Build debug 3D mesh</button>
+      <button class="btn secondary" id="debugMeshButton" type="button">Generate Preview 3D from Debug Mask</button>
+      <button class="btn" id="meshButton" type="button">Generate Final 3D</button>
       <a class="btn secondary" href="/viewer">2D Viewer</a>
     </div>
-    <p class="notice" id="maskWarningText">DEBUG ONLY: threshold mask, not brain extraction</p>
+    <p class="notice" id="maskWarningText">Debug mask only. Not for diagnosis. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET.</p>
+
+    <section class="mesh-state-panel">
+      <div><span>Volume loaded</span><strong id="volumeLoadedText">false</strong></div>
+      <div><span>Mask type</span><strong id="maskTypeText">none</strong></div>
+      <div><span>Mask voxel count</span><strong id="maskVoxelCountText">0</strong></div>
+      <div><span>Mesh API status</span><strong id="meshApiStatusText">none</strong></div>
+      <div><span>Mesh status</span><strong id="meshStatusText">none</strong></div>
+      <div><span>Mesh path</span><strong id="activeMeshPathText">-</strong></div>
+      <div><span>GLB URL</span><strong id="glbUrlText">-</strong></div>
+      <div><span>File exists</span><strong id="meshFileExistsText">false</strong></div>
+      <div><span>File size</span><strong id="meshFileSizeText">0</strong></div>
+      <div><span>Vertex count</span><strong id="meshVertexCountText">-</strong></div>
+      <div><span>Face count</span><strong id="meshFaceCountText">-</strong></div>
+      <div><span>Last error</span><strong id="meshLastErrorText">-</strong></div>
+    </section>
 
     <section class="region-panel">
       <span class="badge green">Region Segmentation</span>
@@ -161,6 +190,6 @@
 </main>
 
 <script src="/static/js/common.js"></script>
-<script src="/static/js/three_d.js"></script>
+  <script src="/static/js/three_d.js?v=mask-overlay-default-on-1"></script>
 </body>
 </html>

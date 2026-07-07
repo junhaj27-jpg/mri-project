@@ -51,10 +51,12 @@ HOST = "127.0.0.1"
 PORT = 8000
 ROOT = PROJECT_ROOT
 FRONTEND_DIR = ROOT / "frontend"
+STATIC_MESH_DIR = FRONTEND_DIR / "static" / "meshes"
 DEFAULT_DATA_DIR = Path(r"C:\Users\user\Desktop\mri2\mri-project-main\data")
 OUTPUT_DIR = ROOT / "outputs"
 MASK_PATH = OUTPUT_DIR / "filled_brain_mask.nii.gz"
 RAW_MASK_PATH = OUTPUT_DIR / "brain_mask.nii.gz"
+PROCESSED_MASK_PATH = ROOT / "data" / "processed" / "brain_mask.nii.gz"
 BRAIN_ONLY_VOLUME_PATH = OUTPUT_DIR / "brain_only.nii.gz"
 FALLBACK_MASK_PATH = OUTPUT_DIR / "fallback_preview_mask.nii.gz"
 INPUT_NIFTI_PATH = OUTPUT_DIR / "input.nii.gz"
@@ -67,6 +69,9 @@ STANDARD_OVERLAY_PLANES = ("axial", "sagittal", "coronal")
 FINAL_OVERLAY_PREFIX = "brain_overlay"
 DEBUG_OVERLAY_PREFIX = "debug_mask_overlay"
 BRAIN_ONLY_MESH_PATH = OUTPUT_DIR / "brain_only_mesh.glb"
+STATIC_BRAIN_MESH_PATH = STATIC_MESH_DIR / "brain.glb"
+DEBUG_PREVIEW_MESH_PATH = STATIC_MESH_DIR / "debug_brain_preview.glb"
+DEBUG_PREVIEW_META_PATH = STATIC_MESH_DIR / "debug_brain_preview.json"
 MASK_SOURCE_META_PATH = OUTPUT_DIR / "brain_mask_source.json"
 REGION_LABELMAP_PATH = OUTPUT_DIR / "regions_labelmap.nii.gz"
 TARGET_MASK_PATH = OUTPUT_DIR / "target_mask.nii.gz"
@@ -148,6 +153,16 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_ai_results())
             elif path == "/api/load":
                 self.send_json(api_load(query))
+            elif path == "/api/mri/metadata":
+                self.send_json(api_mri_metadata(query))
+            elif path == "/api/mri/slice":
+                self.send_mri_slice(query)
+            elif path.startswith("/api/mri/slice/"):
+                route_query = dict(query)
+                route_query["plane"] = [path.rsplit("/", 1)[-1]]
+                self.send_mri_slice(route_query)
+            elif path == "/api/slice-info":
+                self.send_json(api_slice_info(query))
             elif path == "/api/slice":
                 self.send_bytes(api_slice_png(query), "image/png")
             elif path == "/api/mask":
@@ -162,6 +177,12 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_build_mesh(query))
             elif path == "/api/build-debug-mesh":
                 self.send_json(api_build_debug_mesh(query))
+            elif path == "/api/build-preview-mesh":
+                self.send_json(api_build_preview_mesh(query))
+            elif path == "/api/mri/mesh/debug-preview":
+                self.send_json(api_build_preview_mesh(query))
+            elif path == "/api/mri/mesh/debug-preview/status":
+                self.send_json(api_debug_preview_mesh_status())
             elif path == "/api/mesh-status":
                 self.send_json(api_mesh_status())
             elif path == "/api/regions/status":
@@ -186,6 +207,8 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_mesh(query))
             elif path == "/api/mesh_plot":
                 self.send_bytes(api_mesh_plot(query).encode("utf-8"), "text/html; charset=utf-8")
+            elif path == "/api/threejs_viewer":
+                self.send_bytes(api_threejs_viewer(query).encode("utf-8"), "text/html; charset=utf-8")
             else:
                 self.send_error(404, "Not found")
         except Exception as exc:
@@ -209,6 +232,10 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_build_mesh(query))
             elif parsed.path == "/api/build-debug-mesh":
                 self.send_json(api_build_debug_mesh(query))
+            elif parsed.path == "/api/build-preview-mesh":
+                self.send_json(api_build_preview_mesh(query))
+            elif parsed.path == "/api/mri/mesh/debug-preview":
+                self.send_json(api_build_preview_mesh(query))
             elif parsed.path == "/api/regions/run":
                 self.send_json(api_run_region_segmentation())
             elif parsed.path == "/api/regions/build-mesh":
@@ -243,6 +270,23 @@ class BackendHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_mri_slice(self, query: dict[str, list[str]]) -> None:
+        try:
+            self.send_bytes(api_mri_slice_png(query), "image/png")
+        except Exception as exc:
+            LOGGER.error("MRI slice render failed: %s\n%s", exc, traceback.format_exc())
+            payload = {
+                "error": str(exc),
+                "plane": first(query, "plane", "sagittal"),
+                "slice_index": first(query, "index", "middle"),
+                "volume_loaded": get_loaded_mri() is not None,
+            }
+            self.send_response(500)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(format_slice_error(payload).encode("utf-8"))
+
     def send_static(self, path: Path) -> None:
         path = path.resolve()
         frontend_root = FRONTEND_DIR.resolve()
@@ -252,7 +296,7 @@ class BackendHandler(BaseHTTPRequestHandler):
         if not path.exists() or not path.is_file():
             self.send_error(404, "Static file not found")
             return
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        content_type = "model/gltf-binary" if path.suffix.lower() == ".glb" else (mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         self.send_bytes(path.read_bytes(), content_type)
 
     def send_output_file(self, request_path: str) -> None:
@@ -265,7 +309,7 @@ class BackendHandler(BaseHTTPRequestHandler):
         if not path.exists() or not path.is_file():
             self.send_error(404, "Output file not found")
             return
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        content_type = "model/gltf-binary" if path.suffix.lower() == ".glb" else (mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         self.send_bytes(path.read_bytes(), content_type)
 
 
@@ -274,11 +318,17 @@ def api_status() -> dict:
     mask_state = current_mask_state()
     mask_info = current_mask_info(mri_data)
     region_state = region_status_payload()
+    volume_info = volume_diagnostics(mri_data)
     return {
         "loaded": mri_data is not None,
+        "volume_loaded": volume_info["volume_loaded"],
         "source": mri_data.source_type if mri_data else None,
         "source_label": mri_data.source_label if mri_data else None,
         "shape": tuple(int(value) for value in mri_data.volume.shape) if mri_data else None,
+        "volume_shape": volume_info["volume_shape"],
+        "volume_dtype": volume_info["dtype"],
+        "volume_min": volume_info["min_intensity"],
+        "volume_max": volume_info["max_intensity"],
         "spacing": mri_data.spacing if mri_data else None,
         "slice_count": int(mri_data.volume.shape[0]) if mri_data else 0,
         "info": summarize_info(mri_data.info) if mri_data else {},
@@ -472,19 +522,129 @@ def api_load(query: dict[str, list[str]]) -> dict:
 
 
 def api_slice_png(query: dict[str, list[str]]) -> bytes:
+    return api_mri_slice_png(query)
+
+
+def api_mri_metadata(query: dict[str, list[str]]) -> dict:
+    mri_data = get_loaded_mri()
+    if mri_data is None:
+        try:
+            load_startup_sample_volume()
+        except Exception as exc:
+            STATE["last_error"] = str(exc)
+        mri_data = get_loaded_mri()
+    mask_state = current_mask_state()
+    mask_info = current_mask_info(mri_data)
+    if mri_data is None:
+        return {
+            "ok": False,
+            "volume_loaded": False,
+            "message": "No MRI volume found",
+            "search_order": startup_search_order(),
+            "mask_source": mask_state["mask_source"],
+            "mask_status": mask_state["mask_status"],
+            "mask_exists": display_mask_path() is not None,
+            "mask_ratio": mask_info.get("mask_ratio", 0.0),
+            "mask_unique_values": mask_info.get("mask_unique_values", []),
+        }
+    series_meta = current_series_metadata()
+    return {
+        "ok": True,
+        **volume_diagnostics(mri_data),
+        "source": mri_data.source_type,
+        "source_label": mri_data.source_label,
+        "series": mri_data.info.get("SeriesDescription") or mri_data.source_label,
+        "series_name": mri_data.info.get("SeriesDescription") or mri_data.source_label,
+        "file_count": series_meta.get("file_count"),
+        "info": summarize_info(mri_data.info),
+        "mask_source": mask_state["mask_source"],
+        "mask_status": mask_state["mask_status"],
+        "mask_exists": display_mask_path() is not None,
+        "reliable_mask": mask_state["reliable_mask"],
+        "mask_ratio": mask_info.get("mask_ratio", 0.0),
+        "mask_unique_values": mask_info.get("mask_unique_values", []),
+        "mask_shape": mask_info.get("mask_shape"),
+        "mask_sum": mask_info.get("mask_sum", 0),
+        "last_error": str(STATE.get("last_error") or ""),
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def api_mri_slice_png(query: dict[str, list[str]]) -> bytes:
     mri_data = require_mri()
     normalized = require_normalized()
-    plane = first(query, "plane", str(mri_data.info.get("Plane", "sagittal"))).lower()
+    plane = normalize_plane(first(query, "plane", str(mri_data.info.get("Plane", "sagittal"))))
     max_index = plane_length(mri_data.volume, plane) - 1
-    index = max(0, min(int(first(query, "index", str(max_index // 2))), max_index))
+    index = parse_slice_index(first(query, "index", "middle"), max_index)
     image = slice_from_plane(normalized, plane, index)
     mask_slice = None
-    mask = None
-    if first(query, "mask", "1") == "1":
-        mask = ensure_mask_result(mri_data).mask
-    if mask is not None:
-        mask_slice = slice_from_plane(binarize_mask(mask).astype(np.float32), plane, index)
+    overlay_requested = first(query, "overlay", first(query, "mask", "0")).lower() in {"1", "true", "yes", "on"}
+    if overlay_requested:
+        try:
+            mask_path = display_mask_path()
+            if mask_path is None:
+                LOGGER.info("Mask overlay requested but no mask file exists. Rendering raw MRI slice only.")
+            else:
+                mask = load_mask_for_volume(mri_data, mask_path)
+                mask_slice = slice_from_plane(binarize_mask(mask).astype(np.float32), plane, index)
+        except Exception as exc:
+            STATE["last_error"] = f"Mask overlay disabled: {exc}"
+            LOGGER.exception("Mask overlay failed; rendering raw MRI slice only.")
+    LOGGER.info(
+        "slice render plane=%s index=%s max=%s image_shape=%s image_min=%.6f image_max=%.6f overlay=%s",
+        plane,
+        index,
+        max_index,
+        tuple(int(value) for value in image.shape),
+        float(np.min(image)),
+        float(np.max(image)),
+        mask_slice is not None,
+    )
     return draw_slice_png(image, mask_slice)
+
+
+def api_slice_info(query: dict[str, list[str]]) -> dict:
+    mri_data = require_mri()
+    normalized = require_normalized()
+    plane = normalize_plane(first(query, "plane", str(mri_data.info.get("Plane", "sagittal"))))
+    max_index = plane_length(mri_data.volume, plane) - 1
+    requested_index = first(query, "index", "middle")
+    index = parse_slice_index(requested_index, max_index)
+    raw_slice = slice_from_plane(mri_data.volume, plane, index)
+    normalized_slice = slice_from_plane(normalized, plane, index)
+    overlay_enabled = first(query, "overlay", first(query, "mask", "0")).lower() in {"1", "true", "yes", "on"}
+    overlay_available = False
+    overlay_warning = ""
+    if overlay_enabled:
+        try:
+            mask_path = display_mask_path()
+            if mask_path is None:
+                overlay_warning = "Mask not available. Overlay disabled."
+            else:
+                mask = load_mask_for_volume(mri_data, mask_path)
+                overlay_available = mask.shape == mri_data.volume.shape
+                if not overlay_available:
+                    overlay_warning = f"Mask shape mismatch. Overlay disabled. mask={mask.shape} volume={mri_data.volume.shape}"
+        except Exception as exc:
+            overlay_warning = f"Mask overlay disabled: {exc}"
+    info = {
+        **volume_diagnostics(mri_data),
+        "selected_plane": plane,
+        "requested_slice_index": requested_index,
+        "selected_slice_index": index,
+        "max_slice_index": max_index,
+        "slice_shape": tuple(int(value) for value in raw_slice.shape),
+        "slice_dtype": str(raw_slice.dtype),
+        "slice_min_intensity": float(np.nanmin(raw_slice)),
+        "slice_max_intensity": float(np.nanmax(raw_slice)),
+        "normalized_slice_min": float(np.nanmin(normalized_slice)),
+        "normalized_slice_max": float(np.nanmax(normalized_slice)),
+        "overlay_requested": overlay_enabled,
+        "overlay_available": overlay_available,
+        "overlay_warning": overlay_warning,
+    }
+    LOGGER.info("slice info: %s", info)
+    return info
 
 
 def api_mask(query: dict[str, list[str]]) -> dict:
@@ -728,21 +888,35 @@ def api_mesh_status() -> dict:
     mask_state = current_mask_state()
     mri_data = get_loaded_mri()
     mask_info = current_mask_info(mri_data)
+    debug_file_status = api_debug_preview_mesh_status()
     mesh_available = BRAIN_ONLY_MESH_PATH.exists() and bool(mask_state["reliable_mask"])
-    debug_mesh_available = DEBUG_MASK_MESH_PATH.exists()
+    debug_mesh_available = DEBUG_PREVIEW_MESH_PATH.exists() or DEBUG_MASK_MESH_PATH.exists()
+    mask_type = mesh_mask_type(mask_state, mask_info)
     if mesh_available:
         status = "3D mesh loaded"
-    elif debug_mesh_available and not mask_state["reliable_mask"]:
-        status = "Brain mask is debug only. Final 3D disabled."
+    elif debug_mesh_available and mask_type == "debug":
+        status = "debug preview mesh ready"
+    elif mask_type == "debug":
+        status = "Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled."
     else:
         status = "No mesh generated yet"
     return {
         "ok": True,
         "status": status,
+        "mask_type": mask_type,
+        "mesh_status": "ready" if mesh_available or debug_mesh_available else "none",
+        "volume_loaded": mri_data is not None,
         "mesh_available": mesh_available,
         "debug_mesh_available": debug_mesh_available,
         "mesh_path": str(BRAIN_ONLY_MESH_PATH) if mesh_available else "",
-        "debug_mesh_path": str(DEBUG_MASK_MESH_PATH) if debug_mesh_available else "",
+        "debug_mesh_path": str(DEBUG_PREVIEW_MESH_PATH) if DEBUG_PREVIEW_MESH_PATH.exists() else (str(DEBUG_MASK_MESH_PATH) if DEBUG_MASK_MESH_PATH.exists() else ""),
+        "debug_mesh_url": "/static/meshes/debug_brain_preview.glb" if DEBUG_PREVIEW_MESH_PATH.exists() else "",
+        "glb_url": debug_file_status.get("mesh_url", ""),
+        "file_exists": debug_file_status.get("file_exists", False),
+        "file_size": debug_file_status.get("file_size", 0),
+        "vertex_count": debug_file_status.get("vertex_count"),
+        "face_count": debug_file_status.get("face_count"),
+        "mesh_api_status": debug_file_status.get("mesh_status", "none"),
         "mask_source": mask_state["mask_source"],
         "mask_status": mask_state["mask_status"],
         "reliable_mask": mask_state["reliable_mask"],
@@ -756,6 +930,14 @@ def api_mesh_status() -> dict:
         "mask_ratio": mask_info.get("mask_ratio", 0.0),
         "last_error": str(STATE.get("last_error") or ""),
     }
+
+
+def mesh_mask_type(mask_state: dict, mask_info: dict) -> str:
+    if mask_state.get("reliable_mask"):
+        return "final"
+    if FALLBACK_MASK_PATH.exists() or int(mask_info.get("mask_sum") or 0) > 0:
+        return "debug"
+    return "none"
 
 
 def region_status_payload() -> dict:
@@ -921,6 +1103,10 @@ def api_build_mesh(query: dict[str, list[str]]) -> dict:
         }
     )
     if mesh_result.get("ok"):
+        STATIC_MESH_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(BRAIN_ONLY_MESH_PATH, STATIC_BRAIN_MESH_PATH)
+        mesh_result["static_mesh_path"] = str(STATIC_BRAIN_MESH_PATH)
+        mesh_result["static_mesh_url"] = "/static/meshes/brain.glb"
         STATE["last_error"] = ""
         LOGGER.info("3D mesh loaded path=%s vertices=%s faces=%s", mesh_result.get("mesh_path"), mesh_result.get("vertices"), mesh_result.get("faces"))
     else:
@@ -976,6 +1162,119 @@ def api_build_debug_mesh(query: dict[str, list[str]]) -> dict:
     return mesh_result
 
 
+def api_build_preview_mesh(query: dict[str, list[str]]) -> dict:
+    mri_data = require_mri()
+    result = ensure_mask_result(mri_data)
+    diagnostics = effective_mask_diagnostics(result)
+    debug_mask = binarize_mask(result.mask)
+    mask_voxels = int(np.count_nonzero(debug_mask))
+    save_nifti_mask(debug_mask, mri_data.affine, FALLBACK_MASK_PATH)
+    STATIC_MESH_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        if mask_voxels == 0:
+            raise ValueError("Debug mask is empty; cannot build preview mesh.")
+        mesh = build_brain_mesh_from_mask(
+            debug_mask.astype(np.uint8),
+            spacing=mri_data.spacing,
+            gaussian_sigma=float(first(query, "sigma", "1.0")),
+            step_size=max(1, int(first(query, "step", "1"))),
+            downsample_factor=max(2, int(first(query, "downsample", "4"))),
+            smoothing_iterations=max(0, int(first(query, "smooth", "3"))),
+            apply_mesh_smoothing=True,
+        )
+        export_glb(mesh, DEBUG_PREVIEW_MESH_PATH)
+        vertex_count = int(len(mesh.vertices))
+        face_count = int(len(mesh.faces))
+        file_size = int(DEBUG_PREVIEW_MESH_PATH.stat().st_size) if DEBUG_PREVIEW_MESH_PATH.exists() else 0
+        meta_payload = {
+            "ok": True,
+            "mask_type": "debug",
+            "mesh_status": "ready",
+            "mesh_path": "/static/meshes/debug_brain_preview.glb",
+            "mesh_url": "/static/meshes/debug_brain_preview.glb",
+            "filesystem_path": str(DEBUG_PREVIEW_MESH_PATH),
+            "file_exists": DEBUG_PREVIEW_MESH_PATH.exists(),
+            "file_size": file_size,
+            "voxel_count": mask_voxels,
+            "mask_voxel_count": mask_voxels,
+            "vertex_count": vertex_count,
+            "face_count": face_count,
+            "message": "Debug preview mesh generated",
+            "warning": "Debug mask only. Not for diagnosis. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET.",
+        }
+        DEBUG_PREVIEW_META_PATH.write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        STATE["last_error"] = ""
+        return {
+            **meta_payload,
+            "ok": True,
+            "status": "ready",
+            "mesh_status": "ready",
+            "message": "Debug preview mesh generated",
+            "mask_type": "debug",
+            "mask_source": mask_source_label(result),
+            "mask_status": diagnostics.get("mask_status"),
+            "mask_shape": tuple(int(value) for value in debug_mask.shape),
+            "vertices": vertex_count,
+            "faces": face_count,
+            "reliable_mask": False,
+            "reliable_for_3d": False,
+            "debug_only": True,
+        }
+    except Exception as exc:
+        trace = traceback.format_exc(limit=8)
+        message = f"Preview mesh generation failed: {exc}"
+        STATE["last_error"] = message
+        LOGGER.error("%s\n%s", message, trace)
+        return {
+            "ok": False,
+            "status": "failed",
+            "mesh_status": "failed",
+            "error": str(exc),
+            "message": message,
+            "traceback": trace[-4000:],
+            "mask_type": "debug",
+            "mask_source": mask_source_label(result),
+            "mask_status": diagnostics.get("mask_status"),
+            "mask_shape": tuple(int(value) for value in debug_mask.shape),
+            "mask_voxel_count": mask_voxels,
+            "mesh_path": "/static/meshes/debug_brain_preview.glb",
+            "filesystem_path": str(DEBUG_PREVIEW_MESH_PATH),
+            "file_exists": DEBUG_PREVIEW_MESH_PATH.exists(),
+            "file_size": int(DEBUG_PREVIEW_MESH_PATH.stat().st_size) if DEBUG_PREVIEW_MESH_PATH.exists() else 0,
+            "mesh_url": "",
+            "reliable_mask": False,
+            "debug_only": True,
+        }
+
+
+def api_debug_preview_mesh_status() -> dict:
+    payload = {
+        "ok": DEBUG_PREVIEW_MESH_PATH.exists(),
+        "mask_type": "debug" if FALLBACK_MASK_PATH.exists() else "none",
+        "mesh_status": "ready" if DEBUG_PREVIEW_MESH_PATH.exists() else "none",
+        "mesh_path": "/static/meshes/debug_brain_preview.glb",
+        "mesh_url": "/static/meshes/debug_brain_preview.glb",
+        "filesystem_path": str(DEBUG_PREVIEW_MESH_PATH),
+        "file_exists": DEBUG_PREVIEW_MESH_PATH.exists(),
+        "file_size": int(DEBUG_PREVIEW_MESH_PATH.stat().st_size) if DEBUG_PREVIEW_MESH_PATH.exists() else 0,
+        "vertex_count": None,
+        "face_count": None,
+        "voxel_count": None,
+        "last_error": str(STATE.get("last_error") or ""),
+    }
+    if DEBUG_PREVIEW_META_PATH.exists():
+        try:
+            stored = json.loads(DEBUG_PREVIEW_META_PATH.read_text(encoding="utf-8"))
+            payload.update(stored)
+            payload["file_exists"] = DEBUG_PREVIEW_MESH_PATH.exists()
+            payload["file_size"] = int(DEBUG_PREVIEW_MESH_PATH.stat().st_size) if DEBUG_PREVIEW_MESH_PATH.exists() else 0
+            payload["mesh_status"] = "ready" if DEBUG_PREVIEW_MESH_PATH.exists() else "none"
+            payload["ok"] = DEBUG_PREVIEW_MESH_PATH.exists()
+        except Exception as exc:
+            payload["last_error"] = f"Failed to read debug mesh metadata: {exc}"
+    return payload
+
+
 def api_mesh(query: dict[str, list[str]]) -> dict:
     mri_data = require_mri()
     result = ensure_mask_result(mri_data)
@@ -1025,7 +1324,324 @@ def api_mesh_plot(query: dict[str, list[str]]) -> str:
         )
     mesh = get_or_build_mesh(query)
     fig = mesh_to_figure(mesh)
+    if first(query, "debug", "0") == "1":
+        plot = fig.to_html(include_plotlyjs=True, full_html=False, config={"displaylogo": False, "responsive": True})
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<style>html,body{margin:0;width:100%;height:100%;background:#f6f7f9;font-family:Arial,sans-serif;}"
+            ".banner{position:fixed;left:18px;top:18px;z-index:5;max-width:520px;padding:12px 14px;border:1px solid #f59e0b;border-radius:8px;background:#fff8e1;color:#713f12;box-shadow:0 10px 30px rgba(15,23,42,.12)}"
+            ".banner strong{display:block;margin-bottom:4px}</style></head><body>"
+            "<div class='banner'><strong>Preview only / Not for diagnosis</strong>"
+            "Debug mask only. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET.</div>"
+            f"{plot}</body></html>"
+        )
     return fig.to_html(include_plotlyjs=True, full_html=True, config={"displaylogo": False, "responsive": True})
+
+
+def api_threejs_viewer(query: dict[str, list[str]]) -> str:
+    model_url = first(query, "model", "/static/meshes/debug_brain_preview.glb")
+    title = first(query, "title", "Debug mask preview mesh")
+    warning = first(
+        query,
+        "warning",
+        "Debug mask only. Not for diagnosis. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET.",
+    )
+    safe_model = html_escape(model_url)
+    safe_title = html_escape(title)
+    safe_warning = html_escape(warning)
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    html, body {{ margin:0; width:100%; height:100%; overflow:hidden; background:#f6f7f9; font-family:Arial, sans-serif; }}
+    #stage {{ position:fixed; inset:0; }}
+    .banner {{ position:fixed; left:18px; top:18px; z-index:3; max-width:520px; padding:12px 14px; border:1px solid #f59e0b; border-radius:8px; background:#fff8e1; color:#713f12; box-shadow:0 10px 30px rgba(15,23,42,.12); }}
+    .banner strong {{ display:block; margin-bottom:4px; }}
+    .status {{ position:fixed; left:18px; bottom:18px; z-index:3; padding:8px 10px; border-radius:8px; background:rgba(255,255,255,.86); color:#334155; font-size:12px; }}
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="banner"><strong>Preview only / Not for diagnosis</strong>{safe_warning}</div>
+  <div class="status" id="status">Loading GLB...</div>
+  <script>
+    window.__meshReady = false;
+    window.__fallbackTimer = window.setTimeout(() => {{
+      if (!window.__meshReady) {{
+        renderCanvasFallback();
+      }}
+    }}, 12000);
+    async function renderCanvasFallback() {{
+      if (window.__meshReady) return;
+      const stage = document.getElementById('stage');
+      const status = document.getElementById('status');
+      status.textContent = 'Three.js unavailable; rendering canvas surface fallback...';
+      stage.innerHTML = '';
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      stage.appendChild(canvas);
+      function resize() {{
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }}
+      resize();
+      window.addEventListener('resize', resize);
+      try {{
+        const response = await fetch('{safe_model}', {{ cache: 'no-store' }});
+        if (!response.ok) throw new Error('GLB fetch failed: ' + response.status);
+        const buffer = await response.arrayBuffer();
+        const view = new DataView(buffer);
+        if (view.getUint32(0, true) !== 0x46546c67) throw new Error('Invalid GLB header');
+        let offset = 12;
+        let json = null;
+        let binStart = 0;
+        while (offset + 8 <= buffer.byteLength) {{
+          const chunkLength = view.getUint32(offset, true);
+          const chunkType = view.getUint32(offset + 4, true);
+          offset += 8;
+          if (chunkType === 0x4e4f534a) {{
+            json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, offset, chunkLength)));
+          }} else if (chunkType === 0x004e4942) {{
+            binStart = offset;
+          }}
+          offset += chunkLength;
+        }}
+        if (!json || !binStart) throw new Error('GLB chunks missing');
+        function componentArray(componentType) {{
+          if (componentType === 5126) return Float32Array;
+          if (componentType === 5125) return Uint32Array;
+          if (componentType === 5123) return Uint16Array;
+          if (componentType === 5121) return Uint8Array;
+          throw new Error('Unsupported GLB component type: ' + componentType);
+        }}
+        function componentCount(type) {{
+          return {{ SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }}[type] || 1;
+        }}
+        function readAccessor(index) {{
+          const accessor = json.accessors?.[index];
+          const bufferView = json.bufferViews?.[accessor?.bufferView];
+          if (!accessor || !bufferView) throw new Error('Missing GLB accessor ' + index);
+          const ArrayType = componentArray(accessor.componentType);
+          const itemSize = componentCount(accessor.type);
+          const byteOffset = binStart + (bufferView.byteOffset || 0) + (accessor.byteOffset || 0);
+          const byteStride = bufferView.byteStride || (itemSize * ArrayType.BYTES_PER_ELEMENT);
+          if (byteStride === itemSize * ArrayType.BYTES_PER_ELEMENT) {{
+            return {{ array: new ArrayType(buffer, byteOffset, accessor.count * itemSize), count: accessor.count, itemSize }};
+          }}
+          const dense = new ArrayType(accessor.count * itemSize);
+          for (let i = 0; i < accessor.count; i += 1) {{
+            const row = new ArrayType(buffer, byteOffset + i * byteStride, itemSize);
+            dense.set(row, i * itemSize);
+          }}
+          return {{ array: dense, count: accessor.count, itemSize }};
+        }}
+        const primitive = json.meshes?.[0]?.primitives?.[0];
+        if (!primitive) throw new Error('GLB has no mesh primitive');
+        const positionData = readAccessor(primitive.attributes?.POSITION);
+        const positions = positionData.array;
+        const indexData = primitive.indices === undefined ? null : readAccessor(primitive.indices);
+        const indices = indexData?.array || null;
+        const triangles = [];
+        let cx = 0, cy = 0, cz = 0;
+        for (let i = 0; i < positionData.count; i += 1) {{
+          const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+          cx += x; cy += y; cz += z;
+        }}
+        cx /= positionData.count; cy /= positionData.count; cz /= positionData.count;
+        let radius = 1;
+        for (let i = 0; i < positionData.count; i += 1) {{
+          radius = Math.max(radius, Math.hypot(positions[i * 3] - cx, positions[i * 3 + 1] - cy, positions[i * 3 + 2] - cz));
+        }}
+        const faceCount = indices ? Math.floor(indices.length / 3) : Math.floor(positionData.count / 3);
+        const faceStep = Math.max(1, Math.ceil(faceCount / 50000));
+        for (let face = 0; face < faceCount; face += faceStep) {{
+          const a = indices ? indices[face * 3] : face * 3;
+          const b = indices ? indices[face * 3 + 1] : face * 3 + 1;
+          const c = indices ? indices[face * 3 + 2] : face * 3 + 2;
+          triangles.push([a, b, c]);
+        }}
+        let rotX = -0.55;
+        let rotY = 0.75;
+        let dragging = false;
+        let lastX = 0;
+        let lastY = 0;
+        canvas.addEventListener('pointerdown', (event) => {{
+          dragging = true;
+          lastX = event.clientX;
+          lastY = event.clientY;
+          canvas.setPointerCapture(event.pointerId);
+        }});
+        canvas.addEventListener('pointermove', (event) => {{
+          if (!dragging) return;
+          rotY += (event.clientX - lastX) * 0.008;
+          rotX += (event.clientY - lastY) * 0.008;
+          lastX = event.clientX;
+          lastY = event.clientY;
+        }});
+        canvas.addEventListener('pointerup', () => {{ dragging = false; }});
+        function draw() {{
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#f6f7f9';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          const scale = Math.min(canvas.width, canvas.height) * 0.38 / radius;
+          const sinX = Math.sin(rotX), cosX = Math.cos(rotX);
+          const sinY = Math.sin(rotY), cosY = Math.cos(rotY);
+          const projected = new Array(positionData.count);
+          for (let i = 0; i < positionData.count; i += 1) {{
+            let x = positions[i * 3] - cx, y = positions[i * 3 + 1] - cy, z = positions[i * 3 + 2] - cz;
+            const x1 = x * cosY - z * sinY;
+            const z1 = x * sinY + z * cosY;
+            const y1 = y * cosX - z1 * sinX;
+            const z2 = y * sinX + z1 * cosX;
+            projected[i] = [canvas.width / 2 + x1 * scale, canvas.height / 2 - y1 * scale, z2];
+          }}
+          const drawFaces = triangles.map((face) => {{
+            const pa = projected[face[0]], pb = projected[face[1]], pc = projected[face[2]];
+            return {{ face, depth: (pa[2] + pb[2] + pc[2]) / 3 }};
+          }}).sort((a, b) => a.depth - b.depth);
+          ctx.lineWidth = 0.25;
+          for (const item of drawFaces) {{
+            const pa = projected[item.face[0]], pb = projected[item.face[1]], pc = projected[item.face[2]];
+            const ux = pb[0] - pa[0], uy = pb[1] - pa[1];
+            const vx = pc[0] - pa[0], vy = pc[1] - pa[1];
+            if (Math.abs(ux * vy - uy * vx) < 0.08) continue;
+            const shade = Math.max(122, Math.min(214, 168 + item.depth / radius * 52));
+            ctx.beginPath();
+            ctx.moveTo(pa[0], pa[1]);
+            ctx.lineTo(pb[0], pb[1]);
+            ctx.lineTo(pc[0], pc[1]);
+            ctx.closePath();
+            ctx.fillStyle = `rgba(${{shade}},${{shade}},${{shade}},0.88)`;
+            ctx.strokeStyle = `rgba(92,100,112,0.12)`;
+            ctx.fill();
+            ctx.stroke();
+          }}
+          if (!dragging) rotY += 0.0025;
+          requestAnimationFrame(draw);
+        }}
+        status.textContent = `Canvas surface fallback ready · render mode: Canvas surface mesh · vertices: ${{positionData.count}} · faces: ${{faceCount}}`;
+        draw();
+      }} catch (error) {{
+        status.textContent = 'Preview fallback failed: ' + (error && error.message ? error.message : String(error));
+      }}
+    }}
+  </script>
+  <script type="module">
+    Promise.all([
+      import('https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js'),
+      import('https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/controls/OrbitControls.js'),
+      import('https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/loaders/GLTFLoader.js')
+    ]).then(([THREE, controlsModule, loaderModule]) => {{
+    const {{ OrbitControls }} = controlsModule;
+    const {{ GLTFLoader }} = loaderModule;
+    const stage = document.getElementById('stage');
+    const status = document.getElementById('status');
+    const glbUrl = '{safe_model}';
+    console.log('[3D] loading GLB:', glbUrl);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf6f7f9);
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000);
+    const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    stage.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xcbd5e1, 1.2));
+    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    key.position.set(1, 2, 3);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.7);
+    fill.position.set(-3, 1, -2);
+    scene.add(fill);
+
+    function fitCamera(object) {{
+      const box = new THREE.Box3().setFromObject(object);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxSize = Math.max(size.x, size.y, size.z) || 1;
+      const distance = maxSize / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * 1.45;
+      camera.position.set(center.x + distance, center.y + distance * 0.55, center.z + distance);
+      camera.near = Math.max(distance / 1000, 0.01);
+      camera.far = distance * 1000;
+      camera.updateProjectionMatrix();
+      controls.target.copy(center);
+      controls.update();
+    }}
+
+    const loader = new GLTFLoader();
+    loader.load(glbUrl, (gltf) => {{
+      const root = gltf.scene;
+      root.traverse((node) => {{
+        if (node.isMesh) {{
+          node.material = new THREE.MeshStandardMaterial({{ color: 0xb6bcc6, roughness: 0.74, metalness: 0.02, opacity: 0.9, transparent: true, wireframe: false, side: THREE.DoubleSide }});
+          node.castShadow = false;
+          node.receiveShadow = false;
+        }}
+      }});
+      scene.add(root);
+      fitCamera(root);
+      window.__meshReady = true;
+      window.clearTimeout(window.__fallbackTimer);
+      window.parent.postMessage({{ type: 'debugMeshReady' }}, '*');
+      status.textContent = 'GLB surface mesh ready · render mode: GLB surface mesh';
+    }}, (event) => {{
+      if (event.lengthComputable) {{
+        const pct = Math.round((event.loaded / event.total) * 100);
+        status.textContent = 'Loading GLB... ' + pct + '%';
+      }} else {{
+        status.textContent = 'Loading GLB... ' + Math.round((event.loaded || 0) / 1024) + ' KB';
+      }}
+    }}, async (error) => {{
+      let backendStatus = {{}};
+      try {{
+        const response = await fetch('/api/mri/mesh/debug-preview/status?t=' + Date.now(), {{ cache: 'no-store' }});
+        backendStatus = await response.json();
+      }} catch (statusError) {{
+        backendStatus = {{ last_error: String(statusError) }};
+      }}
+      const message = error && error.message ? error.message : String(error);
+      status.innerHTML = 'GLB load failed<br>requested GLB URL: ' + glbUrl
+        + '<br>HTTP status: see Network tab'
+        + '<br>error message: ' + message
+        + '<br>mesh_path: ' + (backendStatus.mesh_path || '-')
+        + '<br>file exists on backend: ' + Boolean(backendStatus.file_exists)
+        + '<br>file size: ' + (backendStatus.file_size || 0);
+      window.__meshReady = false;
+      renderCanvasFallback();
+    }});
+
+    function animate() {{
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }}
+    animate();
+    window.addEventListener('resize', () => {{
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }});
+    }}).catch((error) => {{
+      const status = document.getElementById('status');
+      const glbUrl = '{safe_model}';
+      const message = error && error.message ? error.message : String(error);
+      status.innerHTML = 'Three.js import failed<br>requested GLB URL: ' + glbUrl
+        + '<br>HTTP status: module import failed before GLB request'
+        + '<br>error message: ' + message
+        + '<br>mesh_path: /static/meshes/debug_brain_preview.glb'
+        + '<br>file exists on backend: checking via fallback';
+      renderCanvasFallback();
+    }});
+  </script>
+</body>
+</html>"""
 
 
 def clear_mask_cache(output_dir: Path) -> list[Path]:
@@ -1373,6 +1989,10 @@ def ensure_mask_result(mri_data: MRIData) -> SkullStripResult:
     cached = STATE.get("mask_result")
     if isinstance(cached, SkullStripResult):
         return cached
+    processed_result = load_processed_brain_mask_result(mri_data)
+    if processed_result is not None:
+        STATE["mask_result"] = processed_result
+        return processed_result
     cached_result = load_cached_brain_mask_result(mri_data)
     if cached_result is not None:
         STATE["mask_result"] = cached_result
@@ -1405,6 +2025,50 @@ def ensure_mask_result(mri_data: MRIData) -> SkullStripResult:
         save_standard_mask_overlays(mri_data, result.mask, prefix=DEBUG_OVERLAY_PREFIX)
     STATE["mask_result"] = result
     return result
+
+
+def load_processed_brain_mask_result(mri_data: MRIData) -> SkullStripResult | None:
+    if not PROCESSED_MASK_PATH.exists():
+        return None
+    try:
+        mask = binarize_mask(load_mask_for_volume(mri_data, PROCESSED_MASK_PATH))
+    except Exception as exc:
+        STATE["last_error"] = f"Processed brain mask rejected: {exc}"
+        LOGGER.warning("Processed brain mask exists but is not usable: %s", exc)
+        return None
+    if mask.shape != mri_data.volume.shape or not np.any(mask):
+        STATE["last_error"] = f"Processed brain mask shape/contents invalid: {mask.shape} vs {mri_data.volume.shape}"
+        return None
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    save_nifti_mask(mask, mri_data.affine, RAW_MASK_PATH)
+    save_brain_extracted(mri_data.volume, mask, mri_data.affine, BRAIN_ONLY_VOLUME_PATH)
+    save_mask_source_metadata_for("cached_brain_mask", "data/processed/brain_mask.nii.gz", "valid")
+    metadata = {
+        "method": "data/processed/brain_mask.nii.gz",
+        "mask_source": "cached_brain_mask",
+        "mask_status": "valid",
+        "reliable_mask": True,
+        "reliable_for_3d": True,
+        "debug_only": False,
+        "quality_warnings": [],
+        "processed_mask_path": str(PROCESSED_MASK_PATH),
+    }
+    return SkullStripResult(
+        raw_mask=mask,
+        refined_mask=mask,
+        filled_mask=mask,
+        mask=mask,
+        brain_extracted=mri_data.volume * mask.astype(np.float32),
+        mask_path=RAW_MASK_PATH,
+        refined_mask_path=RAW_MASK_PATH,
+        filled_mask_path=RAW_MASK_PATH,
+        brain_path=BRAIN_ONLY_VOLUME_PATH,
+        method_used="data/processed/brain_mask.nii.gz",
+        reliable_for_3d=True,
+        debug_only=False,
+        metadata=metadata,
+        warnings=[],
+    )
 
 
 def is_final_mask_allowed(
@@ -1495,10 +2159,10 @@ def get_loaded_mri() -> MRIData | None:
 def require_mri() -> MRIData:
     mri_data = get_loaded_mri()
     if mri_data is None:
-        api_load({"data_dir": [str(DEFAULT_DATA_DIR)]})
+        load_startup_sample_volume()
         mri_data = get_loaded_mri()
     if mri_data is None:
-        raise RuntimeError("MRI volume is not loaded.")
+        raise RuntimeError("No MRI volume found")
     return mri_data
 
 
@@ -1887,6 +2551,134 @@ def summarize_info(info: dict) -> dict:
     return {key: info.get(key) for key in keys}
 
 
+def normalize_plane(value: str) -> str:
+    plane = str(value or "sagittal").lower()
+    if plane not in {"sagittal", "coronal", "axial"}:
+        return "sagittal"
+    return plane
+
+
+def parse_slice_index(value: str, max_index: int) -> int:
+    text = str(value or "middle").strip().lower()
+    middle = max(0, int(max_index) // 2)
+    if text in {"middle", "mid", "center", "centre", ""}:
+        return middle
+    try:
+        requested = int(float(text))
+    except ValueError:
+        return middle
+    if requested < 0 or requested > max_index:
+        return middle
+    return requested
+
+
+def volume_diagnostics(mri_data: MRIData | None) -> dict:
+    if mri_data is None:
+        return {
+            "volume_loaded": False,
+            "volume_shape": None,
+            "shape": None,
+            "spacing": None,
+            "dtype": None,
+            "min_intensity": None,
+            "max_intensity": None,
+            "slice_counts": {},
+        }
+    volume = np.asarray(mri_data.volume)
+    return {
+        "volume_loaded": True,
+        "volume_shape": tuple(int(value) for value in volume.shape),
+        "shape": tuple(int(value) for value in volume.shape),
+        "spacing": tuple(float(value) for value in mri_data.spacing),
+        "dtype": str(volume.dtype),
+        "min_intensity": float(np.nanmin(volume)),
+        "max_intensity": float(np.nanmax(volume)),
+        "slice_counts": {
+            "axial": int(plane_length(volume, "axial")),
+            "coronal": int(plane_length(volume, "coronal")),
+            "sagittal": int(plane_length(volume, "sagittal")),
+        },
+    }
+
+
+def current_series_metadata() -> dict:
+    series_key = str(STATE.get("series_key") or "")
+    series = STATE.get("series")
+    if isinstance(series, list):
+        for item in series:
+            if str(item.get("key")) == series_key:
+                return dict(item)
+    mri_data = get_loaded_mri()
+    return {
+        "description": mri_data.source_label if mri_data else "",
+        "file_count": int(mri_data.volume.shape[0]) if mri_data is not None else None,
+    }
+
+
+def startup_search_order() -> list[str]:
+    return [
+        str(ROOT / "data" / "processed" / "*.nii.gz"),
+        str(ROOT / "data" / "input" / "*.nii.gz"),
+        str(ROOT / "data" / "dicom" / "**" / "*"),
+        str(DEFAULT_DATA_DIR / "**" / "*"),
+    ]
+
+
+def load_startup_sample_volume() -> MRIData | None:
+    existing = get_loaded_mri()
+    if existing is not None:
+        return existing
+
+    processed = sorted((ROOT / "data" / "processed").glob("*.nii.gz"))
+    if processed:
+        mri_data = load_nifti(str(processed[0]))
+        STATE["mri_data"] = mri_data
+        STATE["normalized"] = normalize_intensity(mri_data.volume)
+        STATE["series_key"] = str(processed[0])
+        save_input_nifti(mri_data)
+        LOGGER.info("Loaded startup NIfTI from data/processed: %s", processed[0])
+        return mri_data
+
+    input_dir = ROOT / "data" / "input"
+    inputs = sorted(input_dir.glob("*.nii.gz")) if input_dir.exists() else []
+    if inputs:
+        mri_data = load_nifti(str(inputs[0]))
+        STATE["mri_data"] = mri_data
+        STATE["normalized"] = normalize_intensity(mri_data.volume)
+        STATE["series_key"] = str(inputs[0])
+        save_input_nifti(mri_data)
+        LOGGER.info("Loaded startup NIfTI from data/input: %s", inputs[0])
+        return mri_data
+
+    dicom_dir = ROOT / "data" / "dicom"
+    search_dir = dicom_dir if dicom_dir.exists() else DEFAULT_DATA_DIR
+    series = discover_dicom_series(str(search_dir))
+    STATE["series"] = series
+    if series:
+        series_key = str(series[0]["key"])
+        mri_data = load_dicom(str(search_dir), series_key=series_key)
+        STATE["mri_data"] = mri_data
+        STATE["normalized"] = normalize_intensity(mri_data.volume)
+        STATE["series_key"] = series_key
+        save_input_nifti(mri_data)
+        LOGGER.info("Loaded startup DICOM series from %s: %s", search_dir, series_key)
+        return mri_data
+
+    STATE["last_error"] = "No MRI volume found"
+    LOGGER.warning("No MRI volume found. Search order: %s", startup_search_order())
+    return None
+
+
+def format_slice_error(payload: dict) -> str:
+    return (
+        "MRI slice render failed\n"
+        f"error: {payload.get('error')}\n"
+        f"plane: {payload.get('plane')}\n"
+        f"slice index: {payload.get('slice_index')}\n"
+        f"volume loaded: {payload.get('volume_loaded')}"
+    )
+
+
 def first(query: dict[str, list[str]], key: str, default: str) -> str:
     values = query.get(key)
     if not values:
@@ -1896,6 +2688,11 @@ def first(query: dict[str, list[str]], key: str, default: str) -> str:
 
 def run(host: str = HOST, port: int = PORT) -> None:
     FRONTEND_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        load_startup_sample_volume()
+    except Exception as exc:
+        STATE["last_error"] = str(exc)
+        LOGGER.exception("Startup MRI volume auto-load failed.")
     server = ThreadingHTTPServer((host, port), BackendHandler)
     LOGGER.info("AIDLC-MRI backend/frontend running at http://%s:%s", host, port)
     server.serve_forever()

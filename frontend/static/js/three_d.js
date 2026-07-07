@@ -4,13 +4,51 @@ const threeState = {
   meshPreviewText: "",
   reliableMask: false,
   regions: [],
+  metadata: null,
+  sliceReady: false,
+  sliceObjectUrl: "",
+  maskType: "none",
+  meshStatus: "none",
+  debugMeshFallbackTimer: null,
 };
 
 const $3 = (id) => document.getElementById(id);
 
 function syncFinalMeshButton() {
   $3("meshButton").disabled = !threeState.reliableMask;
+  const canBuildDebugPreview = Boolean(threeState.metadata?.volume_loaded) && threeState.maskType === "debug";
+  $3("debugMeshButton").disabled = !canBuildDebugPreview;
 }
+
+function updateMeshStatePanel(meshStatus = {}) {
+  const status = threeState.status || {};
+  const maskType = meshStatus.mask_type || threeState.maskType || "none";
+  const meshState = meshStatus.mesh_status || threeState.meshStatus || "none";
+  const glbUrl = meshStatus.glb_url || meshStatus.mesh_url || meshStatus.debug_mesh_url || "";
+  $3("volumeLoadedText").textContent = String(Boolean(meshStatus.volume_loaded ?? status.volume_loaded));
+  $3("maskTypeText").textContent = maskType;
+  $3("maskVoxelCountText").textContent = String(meshStatus.voxel_count ?? meshStatus.mask_voxel_count ?? meshStatus.mask_sum ?? status.mask_sum ?? 0);
+  $3("meshApiStatusText").textContent = meshStatus.mesh_api_status || meshStatus.mesh_status || "none";
+  $3("meshStatusText").textContent = meshState;
+  $3("activeMeshPathText").textContent = meshStatus.debug_mesh_path || meshStatus.mesh_path || status.final_mesh_path || status.mesh_path || "-";
+  $3("glbUrlText").textContent = glbUrl || "-";
+  $3("meshFileExistsText").textContent = String(Boolean(meshStatus.file_exists));
+  $3("meshFileSizeText").textContent = String(meshStatus.file_size ?? 0);
+  $3("meshVertexCountText").textContent = String(meshStatus.vertex_count ?? meshStatus.vertices ?? "-");
+  $3("meshFaceCountText").textContent = String(meshStatus.face_count ?? meshStatus.faces ?? "-");
+  $3("meshLastErrorText").textContent = meshStatus.last_error || status.last_error || "-";
+}
+
+function debugPreviewWarning() {
+  return "Debug mask only. Not for diagnosis. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET.";
+}
+
+window.addEventListener("message", (event) => {
+  if (event.data?.type === "debugMeshReady" && threeState.debugMeshFallbackTimer) {
+    window.clearTimeout(threeState.debugMeshFallbackTimer);
+    threeState.debugMeshFallbackTimer = null;
+  }
+});
 
 async function loadThreeSeriesList() {
   const data = await apiGet("/api/series");
@@ -26,23 +64,27 @@ async function loadThreeSeriesList() {
 
 async function refreshThreeStatus() {
   const status = await apiGet("/api/status");
+  const metadata = await apiGet("/api/mri/metadata");
   const meshStatus = await apiGet("/api/mesh-status");
   threeState.status = status;
+  threeState.metadata = metadata;
   threeState.reliableMask = Boolean(status.reliable_mask);
-  $3("sourceText").textContent = status.source || "-";
-  $3("shapeText").textContent = formatShape(status.shape);
-  $3("spacingText").textContent = formatSpacing(status.spacing);
+  threeState.maskType = meshStatus.mask_type || (threeState.reliableMask ? "final" : (Number(status.mask_sum || 0) > 0 ? "debug" : "none"));
+  threeState.meshStatus = meshStatus.mesh_status || "none";
+  $3("sourceText").textContent = metadata.source || status.source || "-";
+  $3("shapeText").textContent = formatShape(metadata.shape || status.shape);
+  $3("spacingText").textContent = formatSpacing(metadata.spacing || status.spacing);
   $3("sliceCountText").textContent = String(status.slice_count || "-");
-  $3("seriesText").textContent = status.info?.SeriesDescription || status.source_label || "-";
+  $3("seriesText").textContent = metadata.series_name || metadata.series || status.info?.SeriesDescription || status.source_label || "-";
   $3("hdbetInstalledText").textContent = String(Boolean(status.hdbet_installed));
   $3("synthstripAvailableText").textContent = String(Boolean(status.synthstrip_available));
-  $3("maskSourceText").textContent = status.mask_source || "none";
-  $3("maskStatusText").textContent = status.mask_status || "missing";
+  $3("maskSourceText").textContent = metadata.mask_source || status.mask_source || "none";
+  $3("maskStatusText").textContent = metadata.mask_status || status.mask_status || "missing";
   $3("reliableMaskText").textContent = String(threeState.reliableMask);
   $3("maskShapeText").textContent = formatShape(status.mask_shape);
   $3("maskSumText").textContent = String(status.mask_sum ?? "-");
-  $3("maskRatioText").textContent = String(status.mask_ratio ?? "-");
-  $3("maskUniqueText").textContent = Array.isArray(status.mask_unique_values) ? status.mask_unique_values.join(", ") : "-";
+  $3("maskRatioText").textContent = String(metadata.mask_ratio ?? status.mask_ratio ?? "-");
+  $3("maskUniqueText").textContent = Array.isArray(metadata.mask_unique_values) ? metadata.mask_unique_values.join(", ") : "-";
   $3("inputNiftiPathText").textContent = status.input_nifti_path || "-";
   $3("brainMaskPathText").textContent = status.brain_mask_path || "-";
   $3("brainOnlyPathText").textContent = status.brain_only_path || "-";
@@ -51,19 +93,22 @@ async function refreshThreeStatus() {
   $3("lastErrorText").textContent = status.last_error || "-";
   updateRegionStatus(status.region_segmentation || {});
   $3("meshButton").disabled = !threeState.reliableMask;
+  updateMeshStatePanel(meshStatus);
   $3("surfaceTitle").textContent = threeState.reliableMask
     ? "Stable brain mask surface"
-    : "Debug threshold mask preview - not final brain extraction";
+    : "Debug brain mask preview";
   $3("maskWarningText").textContent = threeState.reliableMask
     ? ""
-    : "DEBUG ONLY: threshold mask, not brain extraction";
+    : debugPreviewWarning();
   $3("meshText").textContent = meshStatus.status || (status.mesh_available ? "3D mesh loaded" : "No mesh generated yet");
-  if (meshStatus.mesh_available) {
+  if (!metadata.volume_loaded) {
+    setMeshFrameMessage("volume not loaded", "warn");
+  } else if (meshStatus.mesh_available) {
     loadMeshPreview();
-  } else if (meshStatus.debug_mesh_available && !threeState.reliableMask) {
-    setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
-  } else if (!threeState.reliableMask) {
-    setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
+  } else if (meshStatus.debug_mesh_available && meshStatus.file_exists && !threeState.reliableMask) {
+    loadDebugMeshPreview(meshStatus.debug_mesh_url || "/static/meshes/debug_brain_preview.glb");
+  } else if (threeState.maskType === "debug") {
+    setMeshFrameMessage("Preview mesh not generated yet. Click Generate Preview 3D.", "warn");
   } else {
     setMeshFrameMessage("No mesh generated yet", "info");
   }
@@ -109,44 +154,117 @@ async function refreshThreeSlice() {
   updateThreeSliceLimit();
   const plane = $3("planeSelect").value;
   const index = Number($3("sliceRange").value);
-  const mask = $3("maskToggle").value;
+  const overlay = $3("maskToggle").value === "1";
   const regionOverlay = $3("regionOverlayToggle").value;
+  threeState.sliceReady = false;
   if (regionOverlay !== "0") {
     const region = encodeURIComponent($3("regionSelect").value);
     const mode = regionOverlay === "all" ? "all" : "selected";
-    $3("sliceImage").src = `/api/regions/overlay?plane=${encodeURIComponent(plane)}&index=${index}&region=${region}&mode=${mode}&t=${Date.now()}`;
+    await loadThreeSliceImage(
+      `/api/regions/overlay?plane=${encodeURIComponent(plane)}&index=${index}&region=${region}&mode=${mode}&t=${Date.now()}`,
+      { plane, index, overlay: regionOverlay, series: $3("seriesText").textContent }
+    );
   } else {
-    $3("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+    const url = `/api/mri/slice?plane=${encodeURIComponent(plane)}&index=${index}&overlay=${overlay ? "true" : "false"}&t=${Date.now()}`;
+    console.log("[MRI 3D] slice preview request URL:", url);
+    await loadThreeSliceImage(url, { plane, index, overlay, series: $3("seriesText").textContent });
   }
+}
+
+async function loadThreeSliceImage(url, context) {
+  console.log("[MRI 3D] slice preview request URL:", url);
+  hideThreeSliceError();
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("image/png")) {
+      const message = await response.text();
+      showThreeSliceError({
+        ...context,
+        url,
+        status: `${response.status} ${response.statusText}`,
+        message: message || `Unexpected content type: ${contentType || "empty"}`,
+      });
+      return;
+    }
+    const blob = await response.blob();
+    if (threeState.sliceObjectUrl) URL.revokeObjectURL(threeState.sliceObjectUrl);
+    threeState.sliceObjectUrl = URL.createObjectURL(blob);
+    $3("sliceImage").onerror = () => showThreeSliceError({
+      ...context,
+      url,
+      status: "image decode failed",
+      message: "Browser could not decode the PNG response.",
+    });
+    $3("sliceImage").onload = () => {
+      threeState.sliceReady = true;
+      hideThreeSliceError();
+      if (!threeState.reliableMask && $3("meshText").textContent === "No mesh generated yet") {
+        $3("meshText").textContent = "slice preview ready; mask missing";
+      }
+    };
+    $3("sliceImage").src = threeState.sliceObjectUrl;
+  } catch (error) {
+    showThreeSliceError({
+      ...context,
+      url,
+      status: "network error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function hideThreeSliceError() {
+  const panel = $3("sliceErrorPanel");
+  if (panel) panel.classList.add("hidden");
+  $3("sliceImage").style.visibility = "visible";
+}
+
+function showThreeSliceError(details) {
+  const metadata = threeState.metadata || {};
+  $3("sliceErrorUrl").textContent = details.url || "-";
+  $3("sliceErrorStatus").textContent = details.status || "-";
+  $3("sliceErrorSeries").textContent = details.series || metadata.series_name || "-";
+  $3("sliceErrorPlane").textContent = details.plane || "-";
+  $3("sliceErrorIndex").textContent = String(details.index ?? "-");
+  $3("sliceErrorOverlay").textContent = String(details.overlay ?? "-");
+  $3("sliceErrorLoaded").textContent = String(Boolean(metadata.volume_loaded ?? threeState.status?.volume_loaded));
+  $3("sliceErrorMaskExists").textContent = String(Boolean(metadata.mask_exists));
+  $3("sliceErrorMessage").textContent = details.message || "-";
+  $3("sliceImage").removeAttribute("src");
+  $3("sliceImage").style.visibility = "hidden";
+  $3("sliceErrorPanel").classList.remove("hidden");
+  threeState.sliceReady = false;
 }
 
 async function generateMesh() {
   setBusy(true);
   try {
     if (!threeState.reliableMask) {
-      const mask = await apiGet("/api/mask");
-      threeState.reliableMask = Boolean(mask.reliable_mask || mask.reliable_for_3d);
-      $3("maskSourceText").textContent = mask.mask_source || "none";
-      $3("maskStatusText").textContent = mask.mask_status || "-";
-      $3("meshText").textContent = mask.status_warning
-        || "Reliable skull stripping is not available. Current mask is threshold debug only. Final 3D brain mesh is disabled.";
-      setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
-      if (!threeState.reliableMask) return;
+      const message = "No valid brain mask. Generate/check brain mask first.";
+      $3("meshText").textContent = message;
+      $3("lastErrorText").textContent = message;
+      setMeshFrameMessage(message, "warn");
+      return;
     }
     const { sigma, smooth, downsample } = meshParams();
     setMeshFrameMessage("Building 3D mesh...", "info");
+    $3("meshStatusText").textContent = "generating";
     const meta = await apiGet(`/api/build-mesh?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1`);
     if (meta.ok === false) {
       threeState.reliableMask = false;
-      const message = meta.message || meta.warning || "Mesh generation failed";
+      const message = meta.message || meta.warning || meta.exception || "Mesh generation failed";
       $3("meshText").textContent = message;
       $3("lastErrorText").textContent = message;
       setMeshFrameMessage(`Mesh generation failed: ${message}`, "error");
+      $3("meshStatusText").textContent = "failed";
       return;
     }
     threeState.meshPreviewText = `3D mesh loaded: ${meta.vertices} vertices / ${meta.faces} faces`;
     $3("meshText").textContent = threeState.meshPreviewText;
     $3("meshPathText").textContent = meta.mesh_path || "-";
+    $3("activeMeshPathText").textContent = meta.static_mesh_path || meta.mesh_path || "-";
+    $3("meshStatusText").textContent = "ready";
     $3("debugMeshPathText").textContent = "-";
     loadMeshPreview();
   } finally {
@@ -164,7 +282,7 @@ async function generateMask() {
     $3("meshButton").disabled = !threeState.reliableMask;
     $3("surfaceTitle").textContent = mask.reliable_for_3d
       ? "Stable brain mask surface"
-      : "Debug threshold mask preview - not final brain extraction";
+      : "Debug brain mask preview";
     $3("maskSourceText").textContent = source;
     $3("maskText").textContent = threeState.reliableMask ? "reliable brain mask" : "threshold debug only";
     $3("maskRatioText").textContent = String(mask.mask_ratio ?? "-");
@@ -174,18 +292,19 @@ async function generateMask() {
     $3("brainMaskPathText").textContent = mask.mask_path || "-";
     $3("maskWarningText").textContent = threeState.reliableMask
       ? ""
-      : "DEBUG ONLY: threshold mask, not brain extraction";
+      : debugPreviewWarning();
     $3("componentCountText").textContent = String(mask.component_count ?? "-");
     $3("largestComponentText").textContent = String(mask.largest_component_ratio ?? "-");
     $3("holeRatioText").textContent = String(mask.hole_ratio ?? "-");
     $3("edgeLeakageText").textContent = mask.edge_leakage === true ? "yes" : (mask.edge_leakage === false ? "no" : "-");
     $3("meshText").textContent = threeState.reliableMask
-      ? "ready for brain-only mesh"
-      : (mask.status_warning || "Reliable skull stripping is not available. Current mask is threshold debug only. Final 3D brain mesh is disabled.");
+      ? "mask ready; final 3D mesh enabled"
+      : "Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.";
     if (!threeState.reliableMask) {
-      setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
+      setMeshFrameMessage("Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.", "warn");
     }
-    $3("sliceImage").src = `/api/mask_overlay?t=${Date.now()}`;
+    await refreshThreeStatus();
+    await refreshThreeSlice();
   } finally {
     setBusy(false);
     syncFinalMeshButton();
@@ -198,7 +317,7 @@ async function rebuildMask() {
     const result = await apiGet("/api/rebuild_mask");
     threeState.reliableMask = false;
     setMeshFrameMessage("No mesh generated yet", "info");
-    $3("surfaceTitle").textContent = "Debug threshold mask preview - not final brain extraction";
+    $3("surfaceTitle").textContent = "Debug brain mask preview";
     $3("maskSourceText").textContent = result.mask_source || "none";
     $3("maskText").textContent = "cache cleared";
     $3("maskRatioText").textContent = "-";
@@ -215,7 +334,7 @@ async function rebuildMask() {
     $3("holeRatioText").textContent = "-";
     $3("edgeLeakageText").textContent = "-";
     $3("meshText").textContent = result.message || "Mask cache cleared.";
-    $3("maskWarningText").textContent = "DEBUG ONLY: threshold mask, not brain extraction";
+    $3("maskWarningText").textContent = debugPreviewWarning();
     $3("meshButton").disabled = true;
     await refreshThreeSlice();
   } finally {
@@ -230,7 +349,7 @@ async function clearOutputs() {
     const result = await apiGet("/api/clear_outputs");
     threeState.reliableMask = false;
     setMeshFrameMessage("No mesh generated yet", "info");
-    $3("surfaceTitle").textContent = "Debug threshold mask preview - not final brain extraction";
+    $3("surfaceTitle").textContent = "Debug brain mask preview";
     $3("maskSourceText").textContent = result.mask_source || "none";
     $3("maskText").textContent = "outputs cleared";
     $3("maskStatusText").textContent = result.mask_status || "missing";
@@ -241,7 +360,7 @@ async function clearOutputs() {
     $3("debugMeshPathText").textContent = "-";
     $3("lastErrorText").textContent = "-";
     $3("meshText").textContent = result.message || "Outputs cleared.";
-    $3("maskWarningText").textContent = "DEBUG ONLY: threshold mask, not brain extraction";
+    $3("maskWarningText").textContent = debugPreviewWarning();
     $3("meshButton").disabled = true;
     await refreshThreeSlice();
   } finally {
@@ -267,16 +386,16 @@ async function runHdbet() {
     $3("lastErrorText").textContent = result.last_error || result.message || "-";
     $3("surfaceTitle").textContent = threeState.reliableMask
       ? "Stable brain mask surface"
-      : "Debug threshold mask preview - not final brain extraction";
+      : "Debug brain mask preview";
     $3("maskWarningText").textContent = threeState.reliableMask
       ? ""
-      : "DEBUG ONLY: threshold mask, not brain extraction";
+      : debugPreviewWarning();
     $3("meshButton").disabled = !threeState.reliableMask;
     $3("meshText").textContent = result.ok
       ? "HD-BET brain mask ready; build final 3D mesh enabled"
       : (result.message || "HD-BET failed; final 3D disabled");
     if (!threeState.reliableMask) {
-      setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
+      setMeshFrameMessage("Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.", "warn");
     }
     await refreshThreeSlice();
   } finally {
@@ -289,19 +408,33 @@ async function generateDebugMesh() {
   setBusy(true);
   try {
     const { sigma, smooth, downsample } = meshParams();
-    setMeshFrameMessage("Building 3D mesh...", "info");
-    const meta = await apiGet(`/api/build-debug-mesh?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1`);
+    setMeshFrameMessage("Generating preview mesh from debug mask...", "info");
+    $3("meshStatusText").textContent = "generating";
+    const meta = await apiGet(`/api/mri/mesh/debug-preview?sigma=${sigma}&smooth=${smooth}&downsample=${Math.max(4, Number(downsample) || 4)}&step=1`);
     if (meta.ok === false) {
-      const message = meta.message || "Debug mesh generation failed";
+      const message = [meta.message || "Debug preview mesh generation failed", meta.traceback || ""].filter(Boolean).join("\n");
       $3("meshText").textContent = message;
       $3("lastErrorText").textContent = message;
+      $3("meshLastErrorText").textContent = message;
+      $3("meshStatusText").textContent = "failed";
+      $3("maskVoxelCountText").textContent = String(meta.mask_voxel_count ?? "-");
       setMeshFrameMessage(`Mesh generation failed: ${message}`, "error");
       return;
     }
-    $3("meshText").textContent = "DEBUG ONLY - not final brain extraction";
-    $3("debugMeshPathText").textContent = meta.mesh_path || meta.output_path || "-";
-    $3("maskWarningText").textContent = "DEBUG ONLY - not final brain extraction";
-    loadDebugMeshPreview();
+    $3("meshText").textContent = "Preview mesh ready. Debug mask only / Not for diagnosis.";
+    $3("debugMeshPathText").textContent = meta.mesh_path || "-";
+    $3("activeMeshPathText").textContent = meta.mesh_path || "-";
+    $3("meshStatusText").textContent = "ready";
+    $3("meshApiStatusText").textContent = meta.mesh_status || "ready";
+    $3("glbUrlText").textContent = meta.mesh_url || meta.mesh_path || "-";
+    $3("meshFileExistsText").textContent = String(Boolean(meta.file_exists ?? true));
+    $3("meshFileSizeText").textContent = String(meta.file_size ?? "-");
+    $3("meshVertexCountText").textContent = String(meta.vertex_count ?? meta.vertices ?? "-");
+    $3("meshFaceCountText").textContent = String(meta.face_count ?? meta.faces ?? "-");
+    $3("maskTypeText").textContent = "debug";
+    $3("maskVoxelCountText").textContent = String(meta.voxel_count ?? meta.mask_voxel_count ?? "-");
+    $3("maskWarningText").textContent = meta.warning || debugPreviewWarning();
+    loadDebugMeshPreview(meta.mesh_url || meta.mesh_path || "/static/meshes/debug_brain_preview.glb");
   } finally {
     setBusy(false);
     syncFinalMeshButton();
@@ -465,7 +598,7 @@ function setMeshFrameMessage(message, tone = "info") {
 
 function loadMeshPreview() {
   if (!threeState.reliableMask) {
-    setMeshFrameMessage("Brain mask is debug only. Final 3D disabled.", "warn");
+    setMeshFrameMessage("Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.", "warn");
     return;
   }
   const { sigma, smooth, downsample } = meshParams();
@@ -474,11 +607,24 @@ function loadMeshPreview() {
   $3("meshFrame").src = `/api/mesh_plot?sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
 }
 
-function loadDebugMeshPreview() {
-  const { sigma, smooth, downsample } = meshParams();
-  $3("meshText").textContent = "DEBUG ONLY - not final brain extraction";
+function loadDebugMeshPreview(meshUrl = "/static/meshes/debug_brain_preview.glb") {
+  if (threeState.debugMeshFallbackTimer) {
+    window.clearTimeout(threeState.debugMeshFallbackTimer);
+  }
+  threeState.meshStatus = "ready";
+  console.log("[3D] loading GLB:", meshUrl);
+  $3("meshText").textContent = "Preview mesh only - not final brain extraction";
+  $3("meshStatusText").textContent = "ready";
+  $3("activeMeshPathText").textContent = meshUrl;
+  $3("meshLastErrorText").textContent = "-";
   $3("meshFrame").removeAttribute("srcdoc");
-  $3("meshFrame").src = `/api/mesh_plot?debug=1&sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
+  $3("meshFrame").src = `/api/threejs_viewer?model=${encodeURIComponent(meshUrl)}&title=${encodeURIComponent("Debug brain preview mesh")}&warning=${encodeURIComponent(debugPreviewWarning())}&t=${Date.now()}`;
+  threeState.debugMeshFallbackTimer = window.setTimeout(() => {
+    const frame = $3("meshFrame");
+    if (frame?.src.includes("/api/threejs_viewer")) {
+      $3("meshText").textContent = "Preview mesh surface fallback - debug mask only / not for diagnosis";
+    }
+  }, 10000);
 }
 
 function loadRegionMeshPreview() {
@@ -521,6 +667,8 @@ function bindThreeControls() {
 }
 
 async function bootThree() {
+  $3("maskToggle").value = "1";
+  $3("regionOverlayToggle").value = "0";
   bindThreeControls();
   setMeshFrameMessage("No mesh generated yet", "info");
   setBusy(true);

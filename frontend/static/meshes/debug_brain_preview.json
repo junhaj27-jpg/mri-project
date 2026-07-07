@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "mask_type": "debug",
+  "mesh_status": "ready",
+  "mesh_path": "/static/meshes/debug_brain_preview.glb",
+  "mesh_url": "/static/meshes/debug_brain_preview.glb",
+  "filesystem_path": "C:\\Users\\user\\Desktop\\mri2\\mri-project-main\\frontend\\static\\meshes\\debug_brain_preview.glb",
+  "file_exists": true,
+  "file_size": 276552,
+  "voxel_count": 1897709,
+  "mask_voxel_count": 1897709,
+  "vertex_count": 7661,
+  "face_count": 15318,
+  "message": "Debug preview mesh generated",
+  "warning": "Debug mask only. Not for diagnosis. Preview mesh only. Final brain-only 3D requires SynthStrip or HD-BET."
+}
