@@ -190,46 +190,110 @@ def create_brain_mask(
     if active.size == 0:
         return np.zeros_like(normalized, dtype=bool), {"method": method, "threshold": 0.0, "components": 0}
 
+    head_threshold = float(max(0.02, np.percentile(active, 5)))
+    rough_head = normalized >= head_threshold
+    rough_head = morphology.remove_small_objects(rough_head, min_size=max(2048, normalized.size // 3000))
+    rough_head = largest_connected_component(rough_head)
+    rough_head = ndi.binary_fill_holes(rough_head)
+    rough_head = morphology.binary_closing(rough_head, morphology.ball(3))
+    rough_head = ndi.binary_fill_holes(rough_head)
+
     base_threshold = float(filters.threshold_otsu(active))
-    percentile_threshold = float(np.percentile(active, 35))
-    threshold = float(np.clip(min(base_threshold, percentile_threshold) * threshold_scale, 0.01, 0.95))
-    foreground = normalized >= threshold
-    min_size = max(1024, int(foreground.size * float(min_size_ratio)))
-    foreground = morphology.remove_small_objects(foreground, min_size=min_size)
-    foreground = largest_connected_component(foreground)
-    foreground = ndi.binary_fill_holes(foreground)
+    percentile_threshold = float(np.percentile(active, 80))
+    threshold = float(np.clip(max(base_threshold, percentile_threshold) * threshold_scale, 0.03, 0.95))
+    head_distance = ndi.distance_transform_edt(rough_head)
+    tissue_low = float(max(0.08, threshold * 0.45))
+    tissue_high = float(np.percentile(active, 99.5))
+    inner_seed = (normalized >= threshold) & rough_head & (head_distance >= 8.0)
+    inner_seed = morphology.remove_small_objects(inner_seed, min_size=max(256, min_size_for_volume(normalized)))
+    inner_seed = keep_component_near_center(inner_seed)
+    if not np.any(inner_seed):
+        inner_seed = (normalized >= threshold) & rough_head
 
-    mask = estimate_brain_parenchyma_region(normalized, foreground, threshold, min_size, plane)
-    if np.count_nonzero(mask) < min_size:
-        mask = foreground & apply_center_ellipsoid_prior(foreground, shrink=0.62)
-    mask = morphology.remove_small_objects(mask.astype(bool), min_size=max(512, min_size // 3))
-    mask = keep_component_near_center(mask)
-    mask = fill_internal_holes_by_slices(mask)
-    mask = ndi.binary_fill_holes(mask)
-    mask = morphology.binary_closing(mask, morphology.ball(2))
-    mask = morphology.remove_small_holes(mask, area_threshold=max(2048, mask.size // 2000))
-    mask = morphology.remove_small_objects(mask, min_size=max(512, min_size // 3))
-    mask = keep_component_near_center(mask)
+    grow_region = (normalized >= tissue_low) & (normalized <= tissue_high) & rough_head & (head_distance >= 2.0)
+    threshold_seed = inner_seed
 
-    smooth = ndi.gaussian_filter(mask.astype(np.float32), sigma=0.8)
-    mask = smooth >= 0.48
-    mask = keep_component_near_center(mask)
-    mask = fill_internal_holes_by_slices(mask)
-    mask = ndi.binary_fill_holes(mask)
+    min_size = max(1024, int(normalized.size * float(min_size_ratio)))
+    mask = threshold_seed.astype(bool)
 
     metadata = {
         "method": method,
         "threshold": threshold,
+        "head_threshold": head_threshold,
+        "tissue_low": tissue_low,
+        "tissue_high": tissue_high,
         "base_threshold": base_threshold,
         "percentile_threshold": percentile_threshold,
         "peel_iterations": 0,
+        "mask_source": "fallback_threshold",
+        "mask_status": "invalid_threshold_noise",
+        "reliable_mask": False,
+        "ellipse_debug": False,
         "fallback_policy": "debug only / not final brain mask",
-        "postprocess": "threshold + centered tissue candidate + largest component + fill holes + closing radius 2 + remove small objects + smoothing",
+        "postprocess": "threshold seed only; debug overlay only; not final brain mask",
         "plane": plane,
+        "threshold_seed_voxels": int(np.count_nonzero(threshold_seed)),
+        "inner_seed_voxels": int(np.count_nonzero(inner_seed)),
+        "rough_head_voxels": int(np.count_nonzero(rough_head)),
         "voxels": int(np.count_nonzero(mask)),
         "components": int(measure.label(mask).max()),
     }
     return mask.astype(bool), metadata
+
+
+def min_size_for_volume(volume: np.ndarray) -> int:
+    return max(512, int(volume.size * 0.00025))
+
+
+def solidify_fallback_debug_mask(seed_mask: np.ndarray, rough_head: np.ndarray, min_size: int) -> np.ndarray:
+    """
+    Turn a threshold seed into one solid debug volume.
+    It remains debug-only; this is not a substitute for SynthStrip/HD-BET.
+    """
+    mask = np.asarray(seed_mask).astype(bool) & np.asarray(rough_head).astype(bool)
+    mask = trim_volume_edges(mask, margin=4)
+    if not np.any(mask):
+        return mask
+
+    min_size = max(256, int(min_size))
+    mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = largest_connected_component(mask)
+    mask = ndi.binary_fill_holes(mask)
+
+    mask = morphology.binary_closing(mask, morphology.ball(3))
+    mask = ndi.binary_fill_holes(mask)
+    mask = morphology.remove_small_holes(mask, area_threshold=max(8192, mask.size // 700))
+    mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = largest_connected_component(mask)
+
+    mask = ndi.binary_fill_holes(mask)
+    mask = morphology.binary_closing(mask, morphology.ball(3))
+    mask = ndi.binary_fill_holes(mask)
+
+    smooth = ndi.gaussian_filter(mask.astype(np.float32), sigma=0.8)
+    mask = smooth >= 0.45
+    mask &= rough_head.astype(bool)
+    mask = trim_volume_edges(mask, margin=4)
+    mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = largest_connected_component(mask)
+    mask = ndi.binary_fill_holes(mask)
+    mask = ndi.binary_fill_holes(mask)
+    return mask.astype(bool)
+
+
+def trim_volume_edges(mask: np.ndarray, margin: int = 4) -> np.ndarray:
+    trimmed = np.asarray(mask).astype(bool).copy()
+    margin = max(0, int(margin))
+    if margin <= 0 or not np.any(trimmed):
+        return trimmed
+    for axis, size in enumerate(trimmed.shape):
+        low = [slice(None)] * trimmed.ndim
+        high = [slice(None)] * trimmed.ndim
+        low[axis] = slice(0, min(margin, size))
+        high[axis] = slice(max(0, size - margin), size)
+        trimmed[tuple(low)] = False
+        trimmed[tuple(high)] = False
+    return trimmed
 
 
 def estimate_brain_parenchyma_region(

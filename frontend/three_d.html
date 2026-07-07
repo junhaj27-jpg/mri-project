@@ -24,8 +24,8 @@
 <main class="three-workspace">
   <section class="three-controls">
     <span class="badge green">3D Preview</span>
-    <h1>Stable brain mask surface</h1>
-    <p class="lead">SynthStrip/HD-BET brain mask를 우선 사용하고, mask 기준 marching cubes 결과만 3D로 표시합니다.</p>
+    <h1 id="surfaceTitle">Debug threshold mask preview - not final brain extraction</h1>
+    <p class="lead">Final brain-only 3D is enabled only when SynthStrip, HD-BET, or cached brain_mask.nii.gz is valid.</p>
 
     <label>DICOM series
       <select id="seriesSelect"></select>
@@ -73,18 +73,32 @@
 
     <div class="actions">
       <button class="btn secondary" id="maskButton" type="button">Generate/check brain mask</button>
-      <button class="btn" id="meshButton" type="button">Generate 3D mesh</button>
+      <button class="btn secondary" id="rebuildMaskButton" type="button">Rebuild mask</button>
+      <button class="btn secondary" id="clearOutputsButton" type="button">Clear outputs</button>
+      <button class="btn secondary" id="runHdbetButton" type="button">Run HD-BET</button>
+      <button class="btn" id="meshButton" type="button">Build final 3D mesh</button>
       <a class="btn secondary" href="/viewer">2D Viewer</a>
     </div>
+    <p class="notice" id="maskWarningText">DEBUG ONLY: threshold mask, not brain extraction</p>
 
     <div class="status-list">
       <div><span>Source</span><strong id="sourceText">-</strong></div>
       <div><span>Shape</span><strong id="shapeText">-</strong></div>
       <div><span>Spacing</span><strong id="spacingText">-</strong></div>
+      <div><span>HD-BET installed</span><strong id="hdbetInstalledText">false</strong></div>
+      <div><span>Mask source</span><strong id="maskSourceText">-</strong></div>
       <div><span>Mask</span><strong id="maskText">not checked</strong></div>
       <div><span>Mask ratio</span><strong id="maskRatioText">-</strong></div>
       <div><span>Mask unique</span><strong id="maskUniqueText">-</strong></div>
       <div><span>Mask status</span><strong id="maskStatusText">-</strong></div>
+      <div><span>Reliable mask</span><strong id="reliableMaskText">false</strong></div>
+      <div><span>Components</span><strong id="componentCountText">-</strong></div>
+      <div><span>Largest comp</span><strong id="largestComponentText">-</strong></div>
+      <div><span>Hole ratio</span><strong id="holeRatioText">-</strong></div>
+      <div><span>Edge leakage</span><strong id="edgeLeakageText">-</strong></div>
+      <div><span>Brain mask path</span><strong id="brainMaskPathText">-</strong></div>
+      <div><span>Mesh path</span><strong id="meshPathText">-</strong></div>
+      <div><span>Last error</span><strong id="lastErrorText">-</strong></div>
       <div><span>Mesh</span><strong id="meshText">-</strong></div>
     </div>
     <p class="notice" id="disclaimer">Viewer only. Not for diagnosis.</p>

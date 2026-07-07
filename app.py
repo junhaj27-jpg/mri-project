@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from brain_mask import create_brain_mask
-from mesh_builder import BrainMesh, build_brain_intensity_mesh_from_volume, build_brain_mesh_from_mask, export_stl
+from mesh_builder import BrainMesh, build_brain_mesh_from_mask, build_final_brain_mesh_from_mask, export_stl
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_nifti_mask
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
 from report import DISCLAIMER, create_viewer_report
@@ -230,7 +230,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         st.subheader("Mesh")
         surface_mode = st.selectbox(
             "Surface mode",
-            ["Stable brain mask surface recommended", "Experimental intensity surface"],
+            ["Stable brain mask surface recommended"],
             index=0,
         )
         iso_percentile = st.slider("Iso level percentile", 10, 80, 35, step=1)
@@ -243,11 +243,23 @@ def show_3d_mode(mri_data: MRIData) -> None:
         remove_small_components = st.checkbox("Remove small components", value=True, disabled=True)
         mesh_opacity = st.slider("Mesh opacity", 0.15, 1.0, 1.0, 0.05)
         show_wireframe = st.checkbox("Show wireframe", value=False)
+        if st.button("Rebuild mask", use_container_width=True):
+            removed = clear_mask_cache(OUTPUT_DIR)
+            clear_mesh_state()
+            st.cache_data.clear()
+            st.warning(f"Mask cache cleared. Removed {len(removed)} files.")
         skullstrip_run_disabled = not effective_tool_available and not method.startswith("Simple fallback")
         sidebar_preview_clicked = st.button("Generate refined mask", type="primary", disabled=skullstrip_run_disabled)
-        sidebar_create_clicked = st.button("Generate final brain-only 3D mesh", disabled=method.startswith("Simple fallback") or not hdbet_ready and not reliable_tool_available)
+        sidebar_create_clicked = st.button(
+            "Generate final brain-only 3D mesh",
+            disabled=method.startswith("Simple fallback") or not hdbet_ready and not reliable_tool_available,
+        )
 
     st.subheader("3D brain-only mesh")
+    current_source, current_status, current_reliable = streamlit_current_mask_state()
+    st.write(f"mask_source: `{current_source}`")
+    st.write(f"mask_status: `{current_status}`")
+    st.write(f"reliable_mask: `{str(current_reliable).lower()}`")
     if hdbet_ready:
         st.success("HD-BET: ready")
         st.write("Mask source: `HD-BET`")
@@ -385,7 +397,7 @@ def show_3d_mode(mri_data: MRIData) -> None:
         for warning in warnings:
             st.warning(warning)
     if debug_only_mask:
-        st.warning("Fallback mask is not reliable enough for final brain-only 3D mesh.")
+        st.warning("Reliable skull stripping is not available. Current mask is threshold debug only. Final 3D brain mesh is disabled.")
 
     if mask is None and create_clicked and hdbet_ready and not reliable_tool_available:
         result = load_existing_hdbet_result(mri_data, hdbet_debug)
@@ -458,10 +470,11 @@ def show_3d_mode(mri_data: MRIData) -> None:
             return
 
     if create_clicked:
-        if debug_only_mask or not reliable_for_3d:
-            st.warning(
-                skullstrip_unavailable_message()
-            )
+        final_ready, final_reason = streamlit_reliable_mask_ready(mask_meta, reliable_for_3d, debug_only_mask, MASK_PATH)
+        if not final_ready:
+            LOGGER.warning("Final 3D blocked: %s", final_reason)
+            st.warning("Reliable skull stripping is not available. Current mask is threshold debug only. Final 3D brain mesh is disabled.")
+            st.info("SynthStrip or HD-BET brain_mask.nii.gz is required for final 3D brain mesh.")
             return
         if quality_warnings:
             st.warning("Mask quality warning: mesh may be inaccurate. Fix the overlay before generating 3D.")
@@ -469,37 +482,21 @@ def show_3d_mode(mri_data: MRIData) -> None:
 
         try:
             with st.spinner("Building brain-only surface mesh..."):
-                try:
-                    mesh = cached_brain_mesh(
-                        surface_mode,
-                        filled_mask,
-                        st.session_state.get("brain_extracted"),
-                        mri_data.spacing,
-                        int(downsample_factor),
-                        int(step_size),
-                        int(smoothing_iterations),
-                        float(mesh_mask_gaussian_sigma),
-                        bool(mesh_smoothing_enabled),
-                        float(iso_percentile),
-                    )
-                except Exception as intensity_exc:
-                    if surface_mode != "Experimental intensity surface":
-                        raise
-                    st.warning("Experimental intensity surface was unstable. Falling back to stable brain mask surface.")
-                    log_exception("Experimental intensity surface failed; falling back", intensity_exc)
-                    surface_mode = "Stable brain mask surface recommended"
-                    mesh = cached_brain_mesh(
-                        surface_mode,
-                        filled_mask,
-                        st.session_state.get("brain_extracted"),
-                        mri_data.spacing,
-                        int(downsample_factor),
-                        int(step_size),
-                        int(smoothing_iterations),
-                        float(mesh_mask_gaussian_sigma),
-                        bool(mesh_smoothing_enabled),
-                        float(iso_percentile),
-                    )
+                mesh = cached_final_brain_mesh(
+                    surface_mode,
+                    st.session_state.get("raw_brain_mask", filled_mask),
+                    st.session_state.get("brain_extracted"),
+                    mri_data.spacing,
+                    True,
+                    str(mask_meta.get("mask_source") or mask_meta.get("method", "")),
+                    str(MASK_PATH),
+                    int(downsample_factor),
+                    int(step_size),
+                    int(smoothing_iterations),
+                    float(mesh_mask_gaussian_sigma),
+                    bool(mesh_smoothing_enabled),
+                    float(iso_percentile),
+                )
                 mesh_path = export_stl(mesh, mesh_output_path(mask_meta, surface_mode))
             st.session_state["brain_mesh"] = mesh
             st.session_state["mesh_info"] = {**mesh_info, "mesh_path": mesh_path, "surface_mode": surface_mode}
@@ -632,6 +629,7 @@ def load_existing_hdbet_result(mri_data: MRIData, debug_info: dict):
 
     metadata = {
         "method": "HD-BET",
+        "mask_source": "hd-bet",
         "reliable_for_3d": True,
         "debug_only": False,
         "tool_mask_path": str(raw_path),
@@ -661,6 +659,40 @@ def load_existing_hdbet_result(mri_data: MRIData, debug_info: dict):
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
+def cached_final_brain_mesh(
+    surface_mode: str,
+    mask: np.ndarray,
+    brain_extracted: np.ndarray | None,
+    spacing: tuple[float, float, float],
+    reliable_mask: bool,
+    mask_source: str,
+    brain_mask_path: str,
+    downsample_factor: int,
+    step_size: int,
+    smoothing_iterations: int,
+    mask_gaussian_sigma: float,
+    mesh_smoothing_enabled: bool,
+    iso_percentile: float,
+) -> BrainMesh:
+    if surface_mode == "Experimental intensity surface":
+        raise ValueError("Intensity marching cubes is disabled. Use binary brain_mask marching cubes only.")
+    return build_final_brain_mesh_from_mask(
+        mask,
+        spacing=spacing,
+        reliable_mask=bool(reliable_mask),
+        mask_source=mask_source,
+        brain_mask_path=brain_mask_path,
+        gaussian_sigma=mask_gaussian_sigma,
+        level=0.5,
+        step_size=step_size,
+        apply_mesh_smoothing=mesh_smoothing_enabled,
+        decimate_ratio=None,
+        downsample_factor=downsample_factor,
+        smoothing_iterations=smoothing_iterations,
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
 def cached_brain_mesh(
     surface_mode: str,
     mask: np.ndarray,
@@ -674,19 +706,7 @@ def cached_brain_mesh(
     iso_percentile: float,
 ) -> BrainMesh:
     if surface_mode == "Experimental intensity surface":
-        if brain_extracted is None:
-            raise ValueError("Brain intensity surface requires brain_extracted volume from HD-BET.")
-        return build_brain_intensity_mesh_from_volume(
-            brain_extracted,
-            mask,
-            spacing=spacing,
-            iso_percentile=float(iso_percentile),
-            gaussian_sigma=mask_gaussian_sigma,
-            step_size=step_size,
-            apply_mesh_smoothing=mesh_smoothing_enabled,
-            downsample_factor=downsample_factor,
-            smoothing_iterations=smoothing_iterations,
-        )
+        raise ValueError("Intensity marching cubes is disabled. Use binary brain_mask marching cubes only.")
     return build_brain_mesh_from_mask(
         mask,
         spacing=spacing,
@@ -1021,6 +1041,91 @@ def mesh_status(mask_meta: dict, reliable_for_3d: bool, debug_only_mask: bool, q
     if quality_warnings:
         return "Disabled", "; ".join(quality_warnings)
     return "Enabled", "validated SynthStrip/HD-BET brain mask"
+
+
+def streamlit_reliable_mask_ready(
+    mask_meta: dict,
+    reliable_for_3d: bool,
+    debug_only_mask: bool,
+    brain_mask_path: Path,
+) -> tuple[bool, str]:
+    source = str(mask_meta.get("mask_source") or mask_meta.get("method", "")).lower()
+    if "synthstrip" in source:
+        source = "synthstrip"
+    elif "hd-bet" in source or "hdbet" in source:
+        source = "hd-bet"
+    if debug_only_mask:
+        return False, "threshold debug only"
+    if not reliable_for_3d:
+        return False, "reliable_for_3d is false"
+    if source not in {"synthstrip", "hd-bet"}:
+        return False, "mask_source is not SynthStrip or HD-BET"
+    if not brain_mask_path.exists():
+        return False, f"{brain_mask_path} does not exist"
+    if mask_meta.get("quality_warnings"):
+        return False, "mask quality warnings exist"
+    return True, "valid reliable skull stripping mask"
+
+
+def clear_mask_cache(output_dir: Path) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    names = {
+        "brain_mask.npy",
+        "brain_mask.nii.gz",
+        "debug_mask.npy",
+        "debug_mask_mesh.glb",
+        "debug_raw_surface.glb",
+        "brain_only_mesh.glb",
+        "brain_only.nii.gz",
+        "brain_mask_source.json",
+        "filled_brain_mask.nii.gz",
+        "refined_brain_mask.nii.gz",
+        "fallback_preview_mask.nii.gz",
+        "debug_fallback_mask.nii.gz",
+        "debug_brain_only.nii.gz",
+        "brain_mask_overlay.png",
+        "brain_overlay.png",
+        "debug_mask_overlay.png",
+    }
+    targets: set[Path] = {output_dir / name for name in names}
+    for pattern in ("*overlay*.png", "*mask*.npy", "*mask*.npz"):
+        targets.update(output_dir.glob(pattern))
+
+    removed: list[Path] = []
+    root = output_dir.resolve()
+    for path in sorted(targets, key=lambda item: str(item).lower()):
+        try:
+            resolved = path.resolve()
+            if root not in resolved.parents and resolved != root:
+                continue
+            if path.exists() and path.is_file():
+                path.unlink()
+                removed.append(path)
+        except Exception as exc:
+            log_exception(f"Failed to remove cached mask file: {path}", exc)
+    return removed
+
+
+def streamlit_current_mask_state() -> tuple[str, str, bool]:
+    meta_path = OUTPUT_DIR / "brain_mask_source.json"
+    raw_path = MASK_PATH
+    fallback_path = OUTPUT_DIR / "fallback_preview_mask.nii.gz"
+    if raw_path.exists() and meta_path.exists():
+        try:
+            import json
+
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            source = str(meta.get("mask_source") or "cached_unknown").lower()
+            status = str(meta.get("mask_status") or "missing")
+            generated_at = str(meta.get("generated_at") or "")
+            reliable = source in {"synthstrip", "hd-bet"} and status == "valid" and bool(generated_at)
+            return (source if reliable else "cached_unknown", status, reliable)
+        except Exception as exc:
+            log_exception("Failed to read mask source metadata", exc)
+            return "cached_unknown", "missing", False
+    if fallback_path.exists():
+        return "fallback_threshold", "invalid_threshold_noise", False
+    return "none", "missing", False
 
 
 def ensure_brain_mask(mri_data: MRIData) -> np.ndarray:

@@ -63,20 +63,30 @@ async function refreshSlice() {
 }
 
 function resetMaskStatus() {
+  $("maskSourceText").textContent = "-";
   $("maskText").textContent = "not checked";
   $("maskRatioText").textContent = "-";
   $("maskUniqueText").textContent = "-";
   $("maskStatusText").textContent = "-";
+  $("componentCountText").textContent = "-";
+  $("largestComponentText").textContent = "-";
+  $("holeRatioText").textContent = "-";
+  $("edgeLeakageText").textContent = "-";
 }
 
 async function generateMask() {
   setBusy(true);
   try {
     const mask = await apiGet("/api/mask");
+    $("maskSourceText").textContent = mask.mask_source || "none";
     $("maskText").textContent = mask.reliable_for_3d ? "reliable brain mask" : "debug fallback mask";
     $("maskRatioText").textContent = String(mask.mask_ratio ?? "-");
     $("maskUniqueText").textContent = Array.isArray(mask.mask_unique_values) ? mask.mask_unique_values.join(", ") : "-";
     $("maskStatusText").textContent = mask.mask_status || "-";
+    $("componentCountText").textContent = String(mask.component_count ?? "-");
+    $("largestComponentText").textContent = String(mask.largest_component_ratio ?? "-");
+    $("holeRatioText").textContent = String(mask.hole_ratio ?? "-");
+    $("edgeLeakageText").textContent = mask.edge_leakage === true ? "yes" : (mask.edge_leakage === false ? "no" : "-");
     await refreshSlice();
   } finally {
     setBusy(false);

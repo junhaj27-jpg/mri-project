@@ -215,6 +215,7 @@ def run_skull_stripping(
                 mask = run_synthstrip(input_path, tool_brain_path, tool_mask_path, synthstrip_command)
                 metadata = {
                     "method": "SynthStrip",
+                    "mask_source": "synthstrip",
                     "command": synthstrip_command,
                     "tool_mask_path": str(tool_mask_path),
                     "tool_brain_path": str(tool_brain_path),
@@ -233,6 +234,7 @@ def run_skull_stripping(
                 )
                 metadata = {
                     "method": "HD-BET",
+                    "mask_source": "hd-bet",
                     "command": hdbet_command,
                     "device": hdbet_device,
                     "tool_attempts": tool_attempts,
@@ -255,25 +257,51 @@ def run_skull_stripping(
                 metadata = {
                     **metadata,
                     "method": "Simple fallback debug only",
+                    "mask_source": "fallback_threshold",
+                    "mask_status": "invalid_threshold_noise",
+                    "reliable_mask": False,
                     "reliable_for_3d": False,
                     "debug_only": True,
                 }
 
-            raw_mask = clean_external_mask(mask)
-            refined_mask, refine_metadata = refine_brain_mask(
-                raw_mask,
-                fill_holes=fill_holes,
-                closing_radius=closing_radius,
-                hole_area_threshold=remove_small_holes_threshold,
-                min_object_size=remove_small_objects_threshold,
-                gaussian_sigma=mask_smoothing_sigma,
-            )
-            filled_mask, filled_metadata = create_filled_brain_surface_mask(
-                refined_mask,
-                hole_area_threshold=max(int(remove_small_holes_threshold), 12000),
-                closing_radius=max(int(closing_radius), 4),
-                min_object_size=int(remove_small_objects_threshold),
-            )
+            if bool(metadata.get("debug_only", False)):
+                raw_mask = mask.astype(bool)
+                refined_mask = raw_mask
+                filled_mask = raw_mask
+                refine_metadata = {
+                    "refinement": "threshold debug only; final reliable refine skipped",
+                    "fill_holes": False,
+                    "closing_radius": 0,
+                    "remove_small_holes_threshold": 0,
+                    "remove_small_objects_threshold": int(remove_small_objects_threshold),
+                    "mask_smoothing_sigma": 0.0,
+                    "refined_components": int(measure.label(refined_mask).max()),
+                    "initial_refine_voxels": int(np.count_nonzero(raw_mask)),
+                }
+                filled_metadata = {
+                    "surface_mask": "threshold debug mask only; not eligible for final brain-only mesh",
+                    "surface_components": int(measure.label(filled_mask).max()),
+                    "surface_voxels": int(np.count_nonzero(filled_mask)),
+                    "surface_hole_area_threshold": 0,
+                    "surface_closing_radius": 0,
+                    "surface_min_object_size": int(remove_small_objects_threshold),
+                }
+            else:
+                raw_mask = clean_external_mask(mask)
+                refined_mask, refine_metadata = refine_brain_mask(
+                    raw_mask,
+                    fill_holes=fill_holes,
+                    closing_radius=closing_radius,
+                    hole_area_threshold=remove_small_holes_threshold,
+                    min_object_size=remove_small_objects_threshold,
+                    gaussian_sigma=mask_smoothing_sigma,
+                )
+                filled_mask, filled_metadata = create_filled_brain_surface_mask(
+                    refined_mask,
+                    hole_area_threshold=max(int(remove_small_holes_threshold), 12000),
+                    closing_radius=max(int(closing_radius), 4),
+                    min_object_size=int(remove_small_objects_threshold),
+                )
             mask_path = save_nifti_mask(raw_mask, mri_data.affine, mask_path)
             refined_mask_path = save_nifti_mask(refined_mask, mri_data.affine, refined_mask_path)
             filled_mask_path = save_nifti_mask(filled_mask, mri_data.affine, filled_mask_path)
@@ -576,7 +604,7 @@ def validate_brain_mask(
     source_text = str(source)
     if debug_only or source_text.lower().startswith("simple fallback"):
         warnings.append("Simple fallback mask is debug-only and cannot generate final brain-only 3D mesh.")
-    if source_text not in {"SynthStrip", "HD-BET"}:
+    if source_text not in {"SynthStrip", "HD-BET", "Cached brain_mask"}:
         warnings.append("Mask source must be SynthStrip or HD-BET for final 3D brain mesh.")
 
     voxels = int(np.count_nonzero(mask))

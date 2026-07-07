@@ -105,6 +105,22 @@ def build_brain_mesh_from_mask(
     raise RuntimeError(f"Brain mesh generation failed after downsample retries: {last_error}") from last_error
 
 
+def build_final_brain_mesh_from_mask(
+    brain_mask: np.ndarray,
+    spacing: tuple[float, float, float] | None = None,
+    reliable_mask: bool = False,
+    mask_source: str = "",
+    brain_mask_path: str | Path | None = None,
+    **kwargs: Any,
+) -> BrainMesh:
+    source = str(mask_source or "").lower()
+    path = Path(brain_mask_path) if brain_mask_path is not None else None
+    if not reliable_mask or source not in {"synthstrip", "hd-bet"} or path is None or not path.exists():
+        raise ValueError("SynthStrip or HD-BET brain_mask.nii.gz is required for final 3D brain mesh.")
+    mask = np.asarray(brain_mask) > 0.5
+    return build_brain_mesh_from_mask(mask.astype(np.uint8), spacing=spacing, level=0.5, **kwargs)
+
+
 def build_brain_intensity_mesh_from_volume(
     brain_extracted: np.ndarray,
     brain_mask: np.ndarray,
@@ -238,9 +254,7 @@ def prepare_mesh_mask(brain_mask: np.ndarray, factor: int, gaussian_sigma: float
     mesh_mask = ndi.binary_fill_holes(mesh_mask)
     if np.count_nonzero(mesh_mask) == 0:
         raise ValueError("Filled brain surface mask became empty after cleanup.")
-    if gaussian_sigma > 0:
-        return ndi.gaussian_filter(mesh_mask.astype(np.float32), sigma=float(gaussian_sigma))
-    return mesh_mask.astype(np.uint8)
+    return mesh_mask.astype(np.float32)
 
 
 def remove_degenerate_faces(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
