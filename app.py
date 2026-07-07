@@ -1058,7 +1058,7 @@ def streamlit_reliable_mask_ready(
         return False, "threshold debug only"
     if not reliable_for_3d:
         return False, "reliable_for_3d is false"
-    if source not in {"synthstrip", "hd-bet"}:
+    if source not in {"synthstrip", "hd-bet", "cached_brain_mask"}:
         return False, "mask_source is not SynthStrip or HD-BET"
     if not brain_mask_path.exists():
         return False, f"{brain_mask_path} does not exist"
@@ -1071,6 +1071,7 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     names = {
         "brain_mask.npy",
+        "input.nii.gz",
         "brain_mask.nii.gz",
         "debug_mask.npy",
         "debug_mask_mesh.glb",
@@ -1088,7 +1089,7 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
         "debug_mask_overlay.png",
     }
     targets: set[Path] = {output_dir / name for name in names}
-    for pattern in ("*overlay*.png", "*mask*.npy", "*mask*.npz"):
+    for pattern in ("*.png", "*.npy", "*.glb", "*mask*.nii.gz", "*mask*.npz"):
         targets.update(output_dir.glob(pattern))
 
     removed: list[Path] = []
@@ -1118,7 +1119,7 @@ def streamlit_current_mask_state() -> tuple[str, str, bool]:
             source = str(meta.get("mask_source") or "cached_unknown").lower()
             status = str(meta.get("mask_status") or "missing")
             generated_at = str(meta.get("generated_at") or "")
-            reliable = source in {"synthstrip", "hd-bet"} and status == "valid" and bool(generated_at)
+            reliable = source in {"synthstrip", "hd-bet", "cached_brain_mask"} and status == "valid" and bool(generated_at)
             return (source if reliable else "cached_unknown", status, reliable)
         except Exception as exc:
             log_exception("Failed to read mask source metadata", exc)

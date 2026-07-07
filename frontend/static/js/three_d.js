@@ -7,6 +7,10 @@ const threeState = {
 
 const $3 = (id) => document.getElementById(id);
 
+function syncFinalMeshButton() {
+  $3("meshButton").disabled = !threeState.reliableMask;
+}
+
 async function loadThreeSeriesList() {
   const data = await apiGet("/api/series");
   threeState.series = data.series || [];
@@ -27,13 +31,22 @@ async function refreshThreeStatus() {
   $3("sourceText").textContent = status.source || "-";
   $3("shapeText").textContent = formatShape(status.shape);
   $3("spacingText").textContent = formatSpacing(status.spacing);
+  $3("sliceCountText").textContent = String(status.slice_count || "-");
   $3("seriesText").textContent = status.info?.SeriesDescription || status.source_label || "-";
   $3("hdbetInstalledText").textContent = String(Boolean(status.hdbet_installed));
+  $3("synthstripAvailableText").textContent = String(Boolean(status.synthstrip_available));
   $3("maskSourceText").textContent = status.mask_source || "none";
   $3("maskStatusText").textContent = status.mask_status || "missing";
   $3("reliableMaskText").textContent = String(threeState.reliableMask);
+  $3("maskShapeText").textContent = formatShape(status.mask_shape);
+  $3("maskSumText").textContent = String(status.mask_sum ?? "-");
+  $3("maskRatioText").textContent = String(status.mask_ratio ?? "-");
+  $3("maskUniqueText").textContent = Array.isArray(status.mask_unique_values) ? status.mask_unique_values.join(", ") : "-";
+  $3("inputNiftiPathText").textContent = status.input_nifti_path || "-";
   $3("brainMaskPathText").textContent = status.brain_mask_path || "-";
-  $3("meshPathText").textContent = status.mesh_path || "-";
+  $3("brainOnlyPathText").textContent = status.brain_only_path || "-";
+  $3("meshPathText").textContent = status.final_mesh_path || status.mesh_path || "-";
+  $3("debugMeshPathText").textContent = status.debug_mesh_path || "-";
   $3("lastErrorText").textContent = status.last_error || "-";
   $3("meshButton").disabled = !threeState.reliableMask;
   $3("surfaceTitle").textContent = threeState.reliableMask
@@ -54,6 +67,7 @@ async function refreshThreeStatus() {
   }
   if (status.disclaimer) $3("disclaimer").textContent = status.disclaimer;
   updateThreeSliceLimit();
+  syncFinalMeshButton();
 }
 
 async function loadThreeVolume() {
@@ -64,6 +78,8 @@ async function loadThreeVolume() {
     await refreshThreeStatus();
     await refreshThreeSlice();
     $3("maskText").textContent = "not checked";
+    $3("maskShapeText").textContent = "-";
+    $3("maskSumText").textContent = "-";
     $3("maskRatioText").textContent = "-";
     $3("maskUniqueText").textContent = "-";
     $3("componentCountText").textContent = "-";
@@ -72,6 +88,7 @@ async function loadThreeVolume() {
     $3("edgeLeakageText").textContent = "-";
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -121,9 +138,11 @@ async function generateMesh() {
     threeState.meshPreviewText = `3D mesh loaded: ${meta.vertices} vertices / ${meta.faces} faces`;
     $3("meshText").textContent = threeState.meshPreviewText;
     $3("meshPathText").textContent = meta.mesh_path || "-";
+    $3("debugMeshPathText").textContent = "-";
     loadMeshPreview();
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -160,6 +179,7 @@ async function generateMask() {
     $3("sliceImage").src = `/api/mask_overlay?t=${Date.now()}`;
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -177,7 +197,9 @@ async function rebuildMask() {
     $3("maskStatusText").textContent = result.mask_status || "missing";
     $3("reliableMaskText").textContent = "false";
     $3("brainMaskPathText").textContent = "-";
+    $3("brainOnlyPathText").textContent = "-";
     $3("meshPathText").textContent = "-";
+    $3("debugMeshPathText").textContent = "-";
     $3("lastErrorText").textContent = "-";
     $3("componentCountText").textContent = "-";
     $3("largestComponentText").textContent = "-";
@@ -189,6 +211,7 @@ async function rebuildMask() {
     await refreshThreeSlice();
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -204,7 +227,9 @@ async function clearOutputs() {
     $3("maskStatusText").textContent = result.mask_status || "missing";
     $3("reliableMaskText").textContent = "false";
     $3("brainMaskPathText").textContent = "-";
+    $3("brainOnlyPathText").textContent = "-";
     $3("meshPathText").textContent = "-";
+    $3("debugMeshPathText").textContent = "-";
     $3("lastErrorText").textContent = "-";
     $3("meshText").textContent = result.message || "Outputs cleared.";
     $3("maskWarningText").textContent = "DEBUG ONLY: threshold mask, not brain extraction";
@@ -212,6 +237,7 @@ async function clearOutputs() {
     await refreshThreeSlice();
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -227,6 +253,7 @@ async function runHdbet() {
     $3("maskStatusText").textContent = result.mask_status || "-";
     $3("reliableMaskText").textContent = String(threeState.reliableMask);
     $3("brainMaskPathText").textContent = result.brain_mask_path || "-";
+    $3("brainOnlyPathText").textContent = result.brain_only_path || "-";
     $3("meshPathText").textContent = result.mesh_path || "-";
     $3("lastErrorText").textContent = result.last_error || result.message || "-";
     $3("surfaceTitle").textContent = threeState.reliableMask
@@ -245,6 +272,7 @@ async function runHdbet() {
     await refreshThreeSlice();
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 
@@ -262,12 +290,12 @@ async function generateDebugMesh() {
       return;
     }
     $3("meshText").textContent = "DEBUG ONLY - not final brain extraction";
-    $3("meshPathText").textContent = meta.mesh_path || meta.output_path || "-";
+    $3("debugMeshPathText").textContent = meta.mesh_path || meta.output_path || "-";
     $3("maskWarningText").textContent = "DEBUG ONLY - not final brain extraction";
     loadDebugMeshPreview();
   } finally {
     setBusy(false);
-    $3("meshButton").disabled = !threeState.reliableMask;
+    syncFinalMeshButton();
   }
 }
 
@@ -358,6 +386,7 @@ async function bootThree() {
     await loadThreeVolume();
   } finally {
     setBusy(false);
+    syncFinalMeshButton();
   }
 }
 

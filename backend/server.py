@@ -168,7 +168,11 @@ class BackendHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            if parsed.path == "/api/build-mesh":
+            if parsed.path in {"/api/clear-outputs", "/api/clear_outputs"}:
+                self.send_json(api_clear_outputs())
+            elif parsed.path in {"/api/run-hdbet", "/api/run_hdbet"}:
+                self.send_json(api_run_hdbet())
+            elif parsed.path == "/api/build-mesh":
                 self.send_json(api_build_mesh(query))
             elif parsed.path == "/api/build-debug-mesh":
                 self.send_json(api_build_debug_mesh(query))
@@ -227,23 +231,34 @@ class BackendHandler(BaseHTTPRequestHandler):
 def api_status() -> dict:
     mri_data = get_loaded_mri()
     mask_state = current_mask_state()
+    mask_info = current_mask_info(mri_data)
     return {
         "loaded": mri_data is not None,
         "source": mri_data.source_type if mri_data else None,
         "source_label": mri_data.source_label if mri_data else None,
         "shape": tuple(int(value) for value in mri_data.volume.shape) if mri_data else None,
         "spacing": mri_data.spacing if mri_data else None,
+        "slice_count": int(mri_data.volume.shape[0]) if mri_data else 0,
         "info": summarize_info(mri_data.info) if mri_data else {},
         "mask_available": RAW_MASK_PATH.exists() or FALLBACK_MASK_PATH.exists(),
         "mask_reliable": BRAIN_ONLY_MESH_PATH.exists() or reliable_mask_file_exists(),
         "mesh_available": BRAIN_ONLY_MESH_PATH.exists() and reliable_mask_file_exists(),
         "debug_mesh_available": DEBUG_MASK_MESH_PATH.exists(),
         "hdbet_installed": hdbet_installed(),
+        "synthstrip_available": synthstrip_available(),
         "mask_source": mask_state["mask_source"],
         "mask_status": mask_state["mask_status"],
         "reliable_mask": mask_state["reliable_mask"],
+        "input_nifti_path": str(INPUT_NIFTI_PATH) if INPUT_NIFTI_PATH.exists() else "",
         "brain_mask_path": str(RAW_MASK_PATH) if RAW_MASK_PATH.exists() else "",
+        "brain_only_path": str(BRAIN_ONLY_VOLUME_PATH) if BRAIN_ONLY_VOLUME_PATH.exists() else "",
         "mesh_path": str(BRAIN_ONLY_MESH_PATH) if BRAIN_ONLY_MESH_PATH.exists() else "",
+        "final_mesh_path": str(BRAIN_ONLY_MESH_PATH) if BRAIN_ONLY_MESH_PATH.exists() else "",
+        "debug_mesh_path": str(DEBUG_MASK_MESH_PATH) if DEBUG_MASK_MESH_PATH.exists() else "",
+        "mask_shape": mask_info.get("mask_shape"),
+        "mask_unique_values": mask_info.get("mask_unique_values", []),
+        "mask_sum": mask_info.get("mask_sum", 0),
+        "mask_ratio": mask_info.get("mask_ratio", 0.0),
         "last_error": str(STATE.get("last_error") or ""),
         "last_hdbet_command": str(STATE.get("last_hdbet_command") or ""),
         "disclaimer": DISCLAIMER,
@@ -402,6 +417,7 @@ def api_load(query: dict[str, list[str]]) -> dict:
     STATE["normalized"] = normalize_intensity(mri_data.volume)
     STATE["mesh"] = None
     STATE["mask_result"] = None
+    save_input_nifti(mri_data)
     return api_status()
 
 
@@ -519,8 +535,7 @@ def api_run_hdbet() -> dict:
     STATE["mesh"] = None
     STATE["mask_result"] = None
     clear_mask_cache(OUTPUT_DIR)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    save_nifti_volume(mri_data.volume, mri_data.affine, INPUT_NIFTI_PATH)
+    save_input_nifti(mri_data)
 
     install_probe = probe_hdbet_install()
     if not install_probe["installed"]:
@@ -606,6 +621,8 @@ def api_run_hdbet() -> dict:
 
 def api_mesh_status() -> dict:
     mask_state = current_mask_state()
+    mri_data = get_loaded_mri()
+    mask_info = current_mask_info(mri_data)
     mesh_available = BRAIN_ONLY_MESH_PATH.exists() and bool(mask_state["reliable_mask"])
     debug_mesh_available = DEBUG_MASK_MESH_PATH.exists()
     if mesh_available:
@@ -624,7 +641,14 @@ def api_mesh_status() -> dict:
         "mask_source": mask_state["mask_source"],
         "mask_status": mask_state["mask_status"],
         "reliable_mask": mask_state["reliable_mask"],
+        "input_nifti_path": str(INPUT_NIFTI_PATH) if INPUT_NIFTI_PATH.exists() else "",
         "brain_mask_path": str(RAW_MASK_PATH) if RAW_MASK_PATH.exists() else "",
+        "brain_only_path": str(BRAIN_ONLY_VOLUME_PATH) if BRAIN_ONLY_VOLUME_PATH.exists() else "",
+        "final_mesh_path": str(BRAIN_ONLY_MESH_PATH) if mesh_available else "",
+        "mask_shape": mask_info.get("mask_shape"),
+        "mask_unique_values": mask_info.get("mask_unique_values", []),
+        "mask_sum": mask_info.get("mask_sum", 0),
+        "mask_ratio": mask_info.get("mask_ratio", 0.0),
         "last_error": str(STATE.get("last_error") or ""),
     }
 
@@ -807,7 +831,7 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
         "brain_overlay.png",
         "debug_mask_overlay.png",
     }
-    patterns = ("*.png", "*.npy", "*mask*.nii.gz", "*mask*.npz")
+    patterns = ("*.png", "*.npy", "*.glb", "*mask*.nii.gz", "*mask*.npz")
     targets: set[Path] = {output_dir / name for name in names}
     for pattern in patterns:
         targets.update(output_dir.glob(pattern))
@@ -824,6 +848,48 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
         except Exception:
             LOGGER.exception("Failed to remove cached mask file: %s", path)
     return removed
+
+
+def save_input_nifti(mri_data: MRIData) -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = save_nifti_volume(mri_data.volume, mri_data.affine, INPUT_NIFTI_PATH)
+    LOGGER.info(
+        "Saved current volume as NIfTI path=%s shape=%s spacing=%s series=%s",
+        path,
+        tuple(int(value) for value in mri_data.volume.shape),
+        mri_data.spacing,
+        mri_data.source_label,
+    )
+    return path
+
+
+def current_mask_info(mri_data: MRIData | None) -> dict:
+    mask_path = RAW_MASK_PATH if RAW_MASK_PATH.exists() else (FALLBACK_MASK_PATH if FALLBACK_MASK_PATH.exists() else None)
+    if mri_data is None or mask_path is None:
+        return {"mask_shape": None, "mask_unique_values": [], "mask_sum": 0, "mask_ratio": 0.0}
+    try:
+        mask = load_mask_for_volume(mri_data, mask_path)
+        diagnostics = mask_diagnostics(mask, debug_only=mask_path != RAW_MASK_PATH)
+        binary = binarize_mask(mask)
+        return {
+            "mask_shape": tuple(int(value) for value in mask.shape),
+            "mask_unique_values": diagnostics.get("mask_unique_values", []),
+            "mask_sum": int(np.count_nonzero(binary)),
+            "mask_ratio": diagnostics.get("mask_ratio", 0.0),
+        }
+    except Exception as exc:
+        LOGGER.exception("Could not collect current mask info.")
+        return {
+            "mask_shape": None,
+            "mask_unique_values": [],
+            "mask_sum": 0,
+            "mask_ratio": 0.0,
+            "mask_error": str(exc),
+        }
+
+
+def synthstrip_available() -> bool:
+    return bool(shutil.which("mri_synthstrip") or shutil.which("synthstrip"))
 
 
 def invalidate_final_outputs() -> None:

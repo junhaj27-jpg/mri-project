@@ -11,6 +11,7 @@ Quick command reference for running, checking, and publishing the project.
 ## 2. Run Backend + Frontend Web App
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\mri2\mri-project-main"
 .\.venv\Scripts\python.exe run_backend_frontend.py
 ```
 
@@ -33,7 +34,14 @@ http://127.0.0.1:8000/ai
 ## 3. Run Streamlit MVP
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\mri2\mri-project-main"
 .\.venv\Scripts\streamlit.exe run app.py --server.port 8501
+```
+
+Alternative direct command:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
 Open:
@@ -63,6 +71,30 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/status
 .\.venv\Scripts\python.exe -m pip install hd-bet
 where hd-bet
 where HD_BET
+```
+
+Check HD-BET import:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import HD_BET; print('HD_BET installed')"
+```
+
+Run HD-BET directly against the current exported input volume:
+
+```powershell
+.\.venv\Scripts\python.exe -m HD_BET.run -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu -mode fast
+```
+
+If this installed HD-BET package does not expose `HD_BET.run`, use the app's Run HD-BET button. The backend falls back to:
+
+```powershell
+.\.venv\Scripts\python.exe -m HD_BET.entry_point -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu --disable_tta --save_bet_mask
+```
+
+Clear generated outputs:
+
+```powershell
+Remove-Item -Recurse -Force outputs\* -ErrorAction SilentlyContinue
 ```
 
 If Windows native HD-BET fails, use WSL2 Ubuntu, Docker, or SynthStrip.
