@@ -3,6 +3,7 @@ const threeState = {
   series: [],
   meshPreviewText: "",
   reliableMask: false,
+  regions: [],
 };
 
 const $3 = (id) => document.getElementById(id);
@@ -48,6 +49,7 @@ async function refreshThreeStatus() {
   $3("meshPathText").textContent = status.final_mesh_path || status.mesh_path || "-";
   $3("debugMeshPathText").textContent = status.debug_mesh_path || "-";
   $3("lastErrorText").textContent = status.last_error || "-";
+  updateRegionStatus(status.region_segmentation || {});
   $3("meshButton").disabled = !threeState.reliableMask;
   $3("surfaceTitle").textContent = threeState.reliableMask
     ? "Stable brain mask surface"
@@ -108,7 +110,14 @@ async function refreshThreeSlice() {
   const plane = $3("planeSelect").value;
   const index = Number($3("sliceRange").value);
   const mask = $3("maskToggle").value;
-  $3("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+  const regionOverlay = $3("regionOverlayToggle").value;
+  if (regionOverlay !== "0") {
+    const region = encodeURIComponent($3("regionSelect").value);
+    const mode = regionOverlay === "all" ? "all" : "selected";
+    $3("sliceImage").src = `/api/regions/overlay?plane=${encodeURIComponent(plane)}&index=${index}&region=${region}&mode=${mode}&t=${Date.now()}`;
+  } else {
+    $3("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+  }
 }
 
 async function generateMesh() {
@@ -299,6 +308,124 @@ async function generateDebugMesh() {
   }
 }
 
+function updateRegionStatus(regionStatus) {
+  threeState.regions = Array.isArray(regionStatus.regions) ? regionStatus.regions : [];
+  $3("synthsegAvailableText").textContent = String(Boolean(regionStatus.synthseg_available));
+  $3("fastsurferAvailableText").textContent = String(Boolean(regionStatus.fastsurfer_available));
+  $3("regionLabelmapText").textContent = regionStatus.labelmap_path || "-";
+  $3("regionStatusText").textContent = regionStatus.status || "missing";
+  $3("regionCsvPathText").textContent = regionStatus.volumes_csv_path || "-";
+  const warning = regionStatus.disabled_warning || regionStatus.message || "";
+  $3("regionWarningText").textContent = warning || "Region label map ready.";
+  updateSelectedRegionVolume();
+}
+
+function updateSelectedRegionVolume() {
+  const regionName = $3("regionSelect").value;
+  const row = threeState.regions.find((item) => item.region_name === regionName);
+  $3("regionVolumeText").textContent = row ? `${row.volume_ml} ml (${row.voxel_count} voxels)` : "-";
+}
+
+async function refreshRegionStatus() {
+  const status = await apiGet("/api/regions/status");
+  updateRegionStatus(status);
+}
+
+async function runRegionSegmentation() {
+  setBusy(true);
+  try {
+    setMeshFrameMessage("Running region segmentation...", "info");
+    const result = await apiGet("/api/regions/run");
+    updateRegionStatus(result.region_status || result);
+    if (!result.ok) {
+      const message = result.message || "Region segmentation failed";
+      $3("lastErrorText").textContent = message;
+      setMeshFrameMessage(message, "warn");
+      return;
+    }
+    $3("regionStatusText").textContent = "valid";
+    await refreshThreeSlice();
+  } finally {
+    setBusy(false);
+    syncFinalMeshButton();
+  }
+}
+
+async function loadRegionLabelmap() {
+  setBusy(true);
+  try {
+    const result = await apiGet("/api/regions/load");
+    updateRegionStatus(result);
+    if (!result.ok) {
+      const message = result.message || "Label map not found";
+      $3("lastErrorText").textContent = message;
+      setMeshFrameMessage(message, "warn");
+      return;
+    }
+    await refreshThreeSlice();
+  } finally {
+    setBusy(false);
+    syncFinalMeshButton();
+  }
+}
+
+async function buildSelectedRegionMesh() {
+  setBusy(true);
+  try {
+    const region = encodeURIComponent($3("regionSelect").value);
+    setMeshFrameMessage("Building 3D mesh...", "info");
+    const result = await apiGet(`/api/regions/build-mesh?region=${region}`);
+    if (!result.ok) {
+      const message = result.message || "Mesh generation failed";
+      $3("lastErrorText").textContent = message;
+      setMeshFrameMessage(`Mesh generation failed: ${message}`, "error");
+      return;
+    }
+    $3("regionMeshPathText").textContent = result.mesh_path || "-";
+    $3("meshText").textContent = `${result.region_name}: ${result.vertices} vertices / ${result.faces} faces`;
+    loadRegionMeshPreview();
+    await refreshRegionStatus();
+  } finally {
+    setBusy(false);
+    syncFinalMeshButton();
+  }
+}
+
+async function buildAllRegionMeshes() {
+  setBusy(true);
+  try {
+    setMeshFrameMessage("Building 3D mesh...", "info");
+    const result = await apiGet("/api/regions/build-all-meshes");
+    if (!result.ok) {
+      const message = result.message || "Region mesh generation failed";
+      $3("lastErrorText").textContent = message;
+      setMeshFrameMessage(`Mesh generation failed: ${message}`, "error");
+      return;
+    }
+    $3("regionCsvPathText").textContent = result.volumes_csv_path || "-";
+    await buildSelectedRegionMesh();
+  } finally {
+    setBusy(false);
+    syncFinalMeshButton();
+  }
+}
+
+async function exportRegionCsv() {
+  setBusy(true);
+  try {
+    const result = await apiGet("/api/regions/export-volumes");
+    if (!result.ok) {
+      $3("lastErrorText").textContent = result.message || "CSV export failed";
+      return;
+    }
+    $3("regionCsvPathText").textContent = result.csv_path || "-";
+    updateRegionStatus({ regions: result.regions, volumes_csv_path: result.csv_path, status: "valid" });
+  } finally {
+    setBusy(false);
+    syncFinalMeshButton();
+  }
+}
+
 function meshParams() {
   return {
     sigma: encodeURIComponent($3("sigmaInput").value),
@@ -354,6 +481,12 @@ function loadDebugMeshPreview() {
   $3("meshFrame").src = `/api/mesh_plot?debug=1&sigma=${sigma}&smooth=${smooth}&downsample=${downsample}&step=1&t=${Date.now()}`;
 }
 
+function loadRegionMeshPreview() {
+  const region = encodeURIComponent($3("regionSelect").value);
+  $3("meshFrame").removeAttribute("srcdoc");
+  $3("meshFrame").src = `/api/regions/mesh_plot?region=${region}&smooth=2&downsample=1&t=${Date.now()}`;
+}
+
 function bindThreeControls() {
   $3("loadButton").addEventListener("click", loadThreeVolume);
   $3("maskButton").addEventListener("click", generateMask);
@@ -362,6 +495,16 @@ function bindThreeControls() {
   $3("runHdbetButton").addEventListener("click", runHdbet);
   $3("meshButton").addEventListener("click", generateMesh);
   $3("debugMeshButton").addEventListener("click", generateDebugMesh);
+  $3("runRegionButton").addEventListener("click", runRegionSegmentation);
+  $3("loadRegionButton").addEventListener("click", loadRegionLabelmap);
+  $3("buildRegionMeshButton").addEventListener("click", buildSelectedRegionMesh);
+  $3("buildAllRegionMeshesButton").addEventListener("click", buildAllRegionMeshes);
+  $3("exportRegionCsvButton").addEventListener("click", exportRegionCsv);
+  $3("regionOverlayToggle").addEventListener("change", refreshThreeSlice);
+  $3("regionSelect").addEventListener("change", () => {
+    updateSelectedRegionVolume();
+    refreshThreeSlice();
+  });
   $3("meshFrame").addEventListener("load", () => {
     if ($3("meshFrame").getAttribute("src")) {
       if ($3("meshText").textContent === "loading preview") {

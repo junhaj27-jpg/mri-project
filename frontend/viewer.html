@@ -58,6 +58,25 @@
             <option value="0">off</option>
           </select>
         </label>
+        <label>Overlay type
+          <select id="overlayTypeSelect">
+            <option value="brain_mask">brain mask</option>
+            <option value="region_selected">selected region</option>
+            <option value="region_all">all region colors</option>
+          </select>
+        </label>
+        <label>Region
+          <select id="regionSelect">
+            <option value="Cerebrum">Cerebrum</option>
+            <option value="Cerebellum">Cerebellum</option>
+            <option value="Brainstem">Brainstem</option>
+            <option value="Ventricle">Ventricle</option>
+            <option value="Hippocampus">Hippocampus</option>
+            <option value="Basal Ganglia">Basal Ganglia</option>
+            <option value="Thalamus">Thalamus</option>
+            <option value="Target Region/Tumor">Target Region/Tumor</option>
+          </select>
+        </label>
         <button class="btn secondary" id="refreshSliceButton" type="button">Refresh slice</button>
         <button class="btn secondary" id="maskButton" type="button">Generate/check brain mask</button>
 
@@ -75,6 +94,8 @@
           <div><span>Largest comp</span><strong id="largestComponentText">-</strong></div>
           <div><span>Hole ratio</span><strong id="holeRatioText">-</strong></div>
           <div><span>Edge leakage</span><strong id="edgeLeakageText">-</strong></div>
+          <div><span>Region status</span><strong id="regionStatusText">-</strong></div>
+          <div><span>Label map</span><strong id="regionLabelmapText">-</strong></div>
         </div>
       </div>
     </aside>

@@ -82,6 +82,42 @@
     </div>
     <p class="notice" id="maskWarningText">DEBUG ONLY: threshold mask, not brain extraction</p>
 
+    <section class="region-panel">
+      <span class="badge green">Region Segmentation</span>
+      <div class="form-grid compact-grid">
+        <label>Region overlay
+          <select id="regionOverlayToggle">
+            <option value="0">off</option>
+            <option value="selected">selected region</option>
+            <option value="all">all regions</option>
+          </select>
+        </label>
+        <label>Selected region
+          <select id="regionSelect">
+            <option value="Whole brain">Whole brain</option>
+            <option value="Cerebrum">Cerebrum</option>
+            <option value="Cerebellum">Cerebellum</option>
+            <option value="Brainstem">Brainstem</option>
+            <option value="Ventricle">Ventricle</option>
+            <option value="Hippocampus">Hippocampus</option>
+            <option value="Basal Ganglia">Basal Ganglia</option>
+            <option value="Thalamus">Thalamus</option>
+            <option value="White Matter">White Matter</option>
+            <option value="Gray Matter">Gray Matter</option>
+            <option value="Target Region/Tumor">Target Region/Tumor</option>
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn secondary" id="runRegionButton" type="button">Run region segmentation</button>
+        <button class="btn secondary" id="loadRegionButton" type="button">Load label map</button>
+        <button class="btn secondary" id="buildRegionMeshButton" type="button">Build selected region 3D</button>
+        <button class="btn secondary" id="buildAllRegionMeshesButton" type="button">Build all region meshes</button>
+        <button class="btn secondary" id="exportRegionCsvButton" type="button">Export region volumes CSV</button>
+      </div>
+      <p class="notice" id="regionWarningText">Region segmentation requires SynthSeg or FastSurfer. Threshold-based region segmentation is disabled.</p>
+    </section>
+
     <div class="status-list">
       <div><span>Source</span><strong id="sourceText">-</strong></div>
       <div><span>Shape</span><strong id="shapeText">-</strong></div>
@@ -106,6 +142,13 @@
       <div><span>Brain-only path</span><strong id="brainOnlyPathText">-</strong></div>
       <div><span>Mesh path</span><strong id="meshPathText">-</strong></div>
       <div><span>Debug mesh path</span><strong id="debugMeshPathText">-</strong></div>
+      <div><span>SynthSeg available</span><strong id="synthsegAvailableText">false</strong></div>
+      <div><span>FastSurfer available</span><strong id="fastsurferAvailableText">false</strong></div>
+      <div><span>Region label map</span><strong id="regionLabelmapText">-</strong></div>
+      <div><span>Region status</span><strong id="regionStatusText">-</strong></div>
+      <div><span>Region volume</span><strong id="regionVolumeText">-</strong></div>
+      <div><span>Region mesh path</span><strong id="regionMeshPathText">-</strong></div>
+      <div><span>Region CSV</span><strong id="regionCsvPathText">-</strong></div>
       <div><span>Last error</span><strong id="lastErrorText">-</strong></div>
       <div><span>Mesh</span><strong id="meshText">-</strong></div>
     </div>

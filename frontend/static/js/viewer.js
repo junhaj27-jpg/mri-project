@@ -24,6 +24,9 @@ async function refreshStatus() {
   $("shapeText").textContent = formatShape(status.shape);
   $("spacingText").textContent = formatSpacing(status.spacing);
   $("seriesText").textContent = status.info?.SeriesDescription || status.source_label || "-";
+  const region = status.region_segmentation || {};
+  $("regionStatusText").textContent = region.status || "missing";
+  $("regionLabelmapText").textContent = region.labelmap_path || "-";
   if ($("disclaimer") && status.disclaimer) $("disclaimer").textContent = status.disclaimer;
   updateSliceLimit();
 }
@@ -58,8 +61,15 @@ async function refreshSlice() {
   const plane = $("planeSelect").value;
   const index = Number($("sliceRange").value);
   const mask = $("maskToggle").value;
+  const overlayType = $("overlayTypeSelect").value;
   $("sliceTitle").textContent = `${plane.charAt(0).toUpperCase()}${plane.slice(1)} slice`;
-  $("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+  if (overlayType === "region_selected" || overlayType === "region_all") {
+    const region = encodeURIComponent($("regionSelect").value);
+    const mode = overlayType === "region_all" ? "all" : "selected";
+    $("sliceImage").src = `/api/regions/overlay?plane=${encodeURIComponent(plane)}&index=${index}&region=${region}&mode=${mode}&t=${Date.now()}`;
+  } else {
+    $("sliceImage").src = `/api/slice?plane=${encodeURIComponent(plane)}&index=${index}&mask=${mask}&t=${Date.now()}`;
+  }
 }
 
 function resetMaskStatus() {
@@ -72,6 +82,8 @@ function resetMaskStatus() {
   $("largestComponentText").textContent = "-";
   $("holeRatioText").textContent = "-";
   $("edgeLeakageText").textContent = "-";
+  $("regionStatusText").textContent = "-";
+  $("regionLabelmapText").textContent = "-";
 }
 
 async function generateMask() {
@@ -99,6 +111,8 @@ function bindViewerControls() {
   $("maskButton").addEventListener("click", generateMask);
   $("planeSelect").addEventListener("change", refreshSlice);
   $("maskToggle").addEventListener("change", refreshSlice);
+  $("overlayTypeSelect").addEventListener("change", refreshSlice);
+  $("regionSelect").addEventListener("change", refreshSlice);
   $("sliceRange").addEventListener("input", () => {
     $("sliceValue").value = $("sliceRange").value;
     refreshSlice();

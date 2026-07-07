@@ -11,8 +11,20 @@ import streamlit as st
 
 from brain_mask import create_brain_mask
 from mesh_builder import BrainMesh, build_brain_mesh_from_mask, build_final_brain_mesh_from_mask, export_stl
-from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_nifti_mask
+from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_nifti_mask, save_nifti_volume
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
+from region_segmentation import (
+    REGION_GROUPS,
+    REGION_SEGMENTATION_DISABLED_MESSAGE,
+    build_region_mesh,
+    export_region_volumes_csv,
+    fastsurfer_available,
+    load_labelmap_array,
+    load_region_labelmap,
+    run_region_segmentation,
+    slugify_region,
+    synthseg_available as region_synthseg_available,
+)
 from report import DISCLAIMER, create_viewer_report
 from skull_stripping import (
     get_hdbet_debug_info,
@@ -31,6 +43,10 @@ REFINED_MASK_PATH = OUTPUT_DIR / "refined_brain_mask.nii.gz"
 FILLED_MASK_PATH = OUTPUT_DIR / "filled_brain_mask.nii.gz"
 MESH_PATH = OUTPUT_DIR / "brain_mesh.stl"
 BRAIN_PATH = OUTPUT_DIR / "brain_extracted.nii.gz"
+INPUT_NIFTI_PATH = OUTPUT_DIR / "input.nii.gz"
+REGION_LABELMAP_PATH = OUTPUT_DIR / "regions_labelmap.nii.gz"
+REGION_MESH_DIR = OUTPUT_DIR / "meshes"
+REGION_VOLUMES_CSV_PATH = OUTPUT_DIR / "region_volumes.csv"
 
 st.set_page_config(page_title="AIDLC-MRI", layout="wide")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -307,6 +323,8 @@ def show_3d_mode(mri_data: MRIData) -> None:
     with st.expander("Debug fallback 3D, not brain-only"):
         st.warning("This is NOT brain-only. Debug only.")
         debug_create_clicked = st.button("Generate debug fallback 3D", use_container_width=True)
+
+    show_region_segmentation_panel(mri_data)
 
     if debug_create_clicked:
         method_key = "Simple fallback"
@@ -1041,6 +1059,82 @@ def mesh_status(mask_meta: dict, reliable_for_3d: bool, debug_only_mask: bool, q
     if quality_warnings:
         return "Disabled", "; ".join(quality_warnings)
     return "Enabled", "validated SynthStrip/HD-BET brain mask"
+
+
+def show_region_segmentation_panel(mri_data: MRIData) -> None:
+    st.subheader("Region Segmentation / Parcellation")
+    st.caption("Region segmentation uses SynthSeg/FastSurfer label maps only. Threshold-based region segmentation is disabled.")
+    synthseg_ready = region_synthseg_available()
+    fastsurfer_ready = fastsurfer_available()
+    st.write(f"SynthSeg available: `{str(synthseg_ready).lower()}`")
+    st.write(f"FastSurfer available: `{str(fastsurfer_ready).lower()}`")
+    if not synthseg_ready and not fastsurfer_ready and not REGION_LABELMAP_PATH.exists():
+        st.warning(REGION_SEGMENTATION_DISABLED_MESSAGE)
+
+    region_names = list(REGION_GROUPS.keys()) + ["Target Region/Tumor"]
+    selected_region = st.selectbox("Region", region_names, index=region_names.index("Cerebrum") if "Cerebrum" in region_names else 0)
+    cols = st.columns(4)
+    run_clicked = cols[0].button("Run region segmentation", use_container_width=True)
+    load_clicked = cols[1].button("Load label map", use_container_width=True)
+    build_clicked = cols[2].button("Build selected region 3D", use_container_width=True)
+    csv_clicked = cols[3].button("Export region volumes CSV", use_container_width=True)
+
+    if run_clicked:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        if not INPUT_NIFTI_PATH.exists():
+            save_nifti_volume(mri_data.volume, mri_data.affine, INPUT_NIFTI_PATH)
+        input_path = OUTPUT_DIR / "brain_only.nii.gz" if (OUTPUT_DIR / "brain_only.nii.gz").exists() else INPUT_NIFTI_PATH
+        with st.spinner("Running SynthSeg/FastSurfer region segmentation..."):
+            result = run_region_segmentation(input_path, REGION_LABELMAP_PATH, Path.cwd())
+        if result.get("ok"):
+            st.success("Region label map generated.")
+        else:
+            st.warning(result.get("message", REGION_SEGMENTATION_DISABLED_MESSAGE))
+            if result.get("stderr"):
+                st.code(result.get("stderr"))
+
+    if load_clicked or run_clicked or REGION_LABELMAP_PATH.exists():
+        info = load_region_labelmap(REGION_LABELMAP_PATH)
+        if info.get("ok"):
+            st.write(f"Label map: `{info.get('labelmap_path')}`")
+            st.write(f"Unique labels: `{info.get('unique_labels')}`")
+            st.dataframe(info.get("regions", []), use_container_width=True)
+        else:
+            st.info(info.get("message", "Label map not found."))
+
+    if csv_clicked:
+        result = export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
+        if result.get("ok"):
+            st.success(f"Region volumes CSV exported: {result.get('csv_path')}")
+        else:
+            st.warning(result.get("message", "CSV export failed."))
+
+    if build_clicked:
+        if selected_region == "Target Region/Tumor":
+            st.info("Target/tumor region is not generated automatically. Place outputs/target_mask.nii.gz from a separate model or manual mask first.")
+            return
+        output_path = REGION_MESH_DIR / f"{slugify_region(selected_region)}.glb"
+        result = build_region_mesh(REGION_LABELMAP_PATH, selected_region, output_path)
+        if not result.get("ok"):
+            st.error(result.get("message", "Region mesh generation failed."))
+            return
+        st.success(f"Region mesh generated: {result.get('mesh_path')}")
+        try:
+            labelmap, _ = load_labelmap_array(REGION_LABELMAP_PATH)
+            region_mask = np.isin(labelmap, REGION_GROUPS[selected_region])
+            mesh = build_brain_mesh_from_mask(
+                region_mask.astype(np.uint8),
+                spacing=mri_data.spacing,
+                gaussian_sigma=0.5,
+                step_size=1,
+                downsample_factor=1,
+                smoothing_iterations=2,
+                apply_mesh_smoothing=True,
+            )
+            st.plotly_chart(mesh_to_figure(mesh), use_container_width=True)
+        except Exception as exc:
+            log_exception("Streamlit region mesh preview failed", exc)
+            st.warning(f"Mesh file was exported, but preview failed: {exc}")
 
 
 def streamlit_reliable_mask_ready(

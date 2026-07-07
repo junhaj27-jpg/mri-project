@@ -30,6 +30,19 @@ from brain_mask import create_brain_mask, create_filled_brain_surface_mask, refi
 from mesh_builder import BrainMesh, build_brain_mesh_from_mask, build_final_brain_mesh_from_mask, build_mesh_from_mask, export_glb
 from mri_loader import MRIData, discover_dicom_series, load_dicom, load_nifti, load_nifti_mask, save_brain_extracted, save_nifti_mask, save_nifti_volume
 from preprocessing import normalize_intensity, plane_length, slice_from_plane
+from region_segmentation import (
+    REGION_COLORS,
+    REGION_GROUPS,
+    REGION_SEGMENTATION_DISABLED_MESSAGE,
+    build_region_mesh,
+    export_region_volumes_csv,
+    fastsurfer_available,
+    load_labelmap_array,
+    load_region_labelmap,
+    run_region_segmentation,
+    slugify_region,
+    synthseg_available as region_synthseg_available,
+)
 from report import DISCLAIMER
 from skull_stripping import SkullStripResult, run_skull_stripping
 
@@ -55,6 +68,10 @@ FINAL_OVERLAY_PREFIX = "brain_overlay"
 DEBUG_OVERLAY_PREFIX = "debug_mask_overlay"
 BRAIN_ONLY_MESH_PATH = OUTPUT_DIR / "brain_only_mesh.glb"
 MASK_SOURCE_META_PATH = OUTPUT_DIR / "brain_mask_source.json"
+REGION_LABELMAP_PATH = OUTPUT_DIR / "regions_labelmap.nii.gz"
+TARGET_MASK_PATH = OUTPUT_DIR / "target_mask.nii.gz"
+REGION_MESH_DIR = OUTPUT_DIR / "meshes"
+REGION_VOLUMES_CSV_PATH = OUTPUT_DIR / "region_volumes.csv"
 RELIABLE_SKULL_STRIP_WARNING = (
     "Reliable skull stripping is not available. Current mask is debug only. "
     "Final 3D brain mesh is disabled."
@@ -147,6 +164,22 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_build_debug_mesh(query))
             elif path == "/api/mesh-status":
                 self.send_json(api_mesh_status())
+            elif path == "/api/regions/status":
+                self.send_json(api_region_status())
+            elif path == "/api/regions/run":
+                self.send_json(api_run_region_segmentation())
+            elif path == "/api/regions/load":
+                self.send_json(api_load_regions())
+            elif path == "/api/regions/build-mesh":
+                self.send_json(api_build_region_mesh(query))
+            elif path == "/api/regions/build-all-meshes":
+                self.send_json(api_build_all_region_meshes())
+            elif path == "/api/regions/export-volumes":
+                self.send_json(api_export_region_volumes())
+            elif path == "/api/regions/overlay":
+                self.send_bytes(api_region_overlay_png(query), "image/png")
+            elif path == "/api/regions/mesh_plot":
+                self.send_bytes(api_region_mesh_plot(query).encode("utf-8"), "text/html; charset=utf-8")
             elif path == "/api/mask_overlay":
                 self.send_bytes(api_mask_overlay_png(query), "image/png")
             elif path == "/api/mesh":
@@ -176,6 +209,14 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self.send_json(api_build_mesh(query))
             elif parsed.path == "/api/build-debug-mesh":
                 self.send_json(api_build_debug_mesh(query))
+            elif parsed.path == "/api/regions/run":
+                self.send_json(api_run_region_segmentation())
+            elif parsed.path == "/api/regions/build-mesh":
+                self.send_json(api_build_region_mesh(query))
+            elif parsed.path == "/api/regions/build-all-meshes":
+                self.send_json(api_build_all_region_meshes())
+            elif parsed.path == "/api/regions/export-volumes":
+                self.send_json(api_export_region_volumes())
             else:
                 self.send_error(404, "Not found")
         except Exception as exc:
@@ -232,6 +273,7 @@ def api_status() -> dict:
     mri_data = get_loaded_mri()
     mask_state = current_mask_state()
     mask_info = current_mask_info(mri_data)
+    region_state = region_status_payload()
     return {
         "loaded": mri_data is not None,
         "source": mri_data.source_type if mri_data else None,
@@ -246,6 +288,9 @@ def api_status() -> dict:
         "debug_mesh_available": DEBUG_MASK_MESH_PATH.exists(),
         "hdbet_installed": hdbet_installed(),
         "synthstrip_available": synthstrip_available(),
+        "synthseg_available": region_synthseg_available(),
+        "fastsurfer_available": fastsurfer_available(),
+        "region_segmentation": region_state,
         "mask_source": mask_state["mask_source"],
         "mask_status": mask_state["mask_status"],
         "reliable_mask": mask_state["reliable_mask"],
@@ -375,6 +420,7 @@ def api_ai_results() -> dict:
     reliable_ready = reliable_mask_file_exists()
     mesh_ready = reliable_ready and BRAIN_ONLY_MESH_PATH.exists()
     debug_mesh_ready = DEBUG_MASK_MESH_PATH.exists()
+    region_state = region_status_payload()
     return {
         "engine": "HD-BET / skull-stripping assisted viewer",
         "mask_source": str(RAW_MASK_PATH) if reliable_ready else "not available",
@@ -382,12 +428,16 @@ def api_ai_results() -> dict:
         "brain_only_source": str(BRAIN_ONLY_VOLUME_PATH) if reliable_ready and BRAIN_ONLY_VOLUME_PATH.exists() else "not generated",
         "brain_overlay_source": str(BRAIN_OVERLAY_PATH) if reliable_ready and BRAIN_OVERLAY_PATH.exists() else "not generated",
         "debug_mesh_source": str(DEBUG_MASK_MESH_PATH) if debug_mesh_ready else "not generated",
+        "region_labelmap_source": str(REGION_LABELMAP_PATH) if REGION_LABELMAP_PATH.exists() else "not generated",
+        "region_volumes_csv": str(REGION_VOLUMES_CSV_PATH) if REGION_VOLUMES_CSV_PATH.exists() else "not generated",
+        "region_segmentation": region_state,
         "debug_raw_surface_source": str(DEBUG_RAW_SURFACE_PATH) if DEBUG_RAW_SURFACE_PATH.exists() else "not generated",
         "volume_shape": tuple(int(value) for value in mri_data.volume.shape) if mri_data else None,
         "mask_volume": mask_info,
         "checks": [
             {"label": "Brain mask available", "ok": RAW_MASK_PATH.exists() or FALLBACK_MASK_PATH.exists()},
             {"label": "Stable mesh exported", "ok": mesh_ready},
+            {"label": "Region label map available", "ok": REGION_LABELMAP_PATH.exists()},
             {"label": "2D overlay supported", "ok": BRAIN_MASK_OVERLAY_PATH.exists()},
             {"label": "Diagnostic claim blocked", "ok": True},
         ],
@@ -494,6 +544,61 @@ def api_mask_overlay_png(query: dict[str, list[str]]) -> bytes:
     mri_data = require_mri()
     result = ensure_mask_result(mri_data)
     return render_mask_overlay_png(mri_data, result.mask, query)
+
+
+def api_region_overlay_png(query: dict[str, list[str]]) -> bytes:
+    mri_data = require_mri()
+    region_name = first(query, "region", "Cerebrum")
+    if region_name == "Target Region/Tumor":
+        if not TARGET_MASK_PATH.exists():
+            return draw_status_png("target_mask.nii.gz not found. Load a manual/model target mask first.")
+        mask = load_nifti_mask(TARGET_MASK_PATH)
+        return render_mask_overlay_png(mri_data, mask, query)
+    if not REGION_LABELMAP_PATH.exists():
+        return draw_status_png("Region label map missing. Run SynthSeg/FastSurfer first.")
+    return render_region_overlay_png(mri_data, REGION_LABELMAP_PATH, query)
+
+
+def api_region_mesh_plot(query: dict[str, list[str]]) -> str:
+    region_name = first(query, "region", "Cerebrum")
+    if region_name == "Target Region/Tumor":
+        if not TARGET_MASK_PATH.exists():
+            return status_html("Target mask missing", "Load outputs/target_mask.nii.gz from a separate tumor model or manual mask.")
+        try:
+            mri_data = require_mri()
+            mask = load_nifti_mask(TARGET_MASK_PATH)
+            mesh = build_brain_mesh_from_mask(mask.astype(np.uint8), spacing=mri_data.spacing, gaussian_sigma=0.5, step_size=1)
+            fig = mesh_to_figure(mesh, color=REGION_COLORS.get(region_name, "#dc2626"), title=region_name)
+            return fig.to_html(include_plotlyjs=True, full_html=True, config={"displaylogo": False, "responsive": True})
+        except Exception as exc:
+            LOGGER.exception("Target mesh preview failed.")
+            return status_html("Mesh generation failed", str(exc))
+    if not REGION_LABELMAP_PATH.exists():
+        return status_html("No region label map", "Run region segmentation or load outputs/regions_labelmap.nii.gz.")
+    label_ids = REGION_GROUPS.get(region_name)
+    if not label_ids:
+        return status_html("Selected region not found", f"Unknown region: {region_name}")
+    try:
+        labelmap, _ = load_labelmap_array(REGION_LABELMAP_PATH)
+        region_mask = np.isin(labelmap, label_ids)
+        if not np.any(region_mask):
+            return status_html("Selected region not found", f"{region_name} has no voxels in the current label map.")
+        mri_data = require_mri()
+        mesh = build_brain_mesh_from_mask(
+            region_mask.astype(np.uint8),
+            spacing=mri_data.spacing,
+            gaussian_sigma=0.5,
+            step_size=1,
+            downsample_factor=max(1, int(first(query, "downsample", "1"))),
+            smoothing_iterations=max(0, int(first(query, "smooth", "2"))),
+            apply_mesh_smoothing=True,
+        )
+        color = REGION_COLORS.get(region_name, "#94a3b8")
+        fig = mesh_to_figure(mesh, color=color, title=region_name)
+        return fig.to_html(include_plotlyjs=True, full_html=True, config={"displaylogo": False, "responsive": True})
+    except Exception as exc:
+        LOGGER.exception("Region mesh preview failed.")
+        return status_html("Mesh generation failed", str(exc))
 
 
 def api_rebuild_mask() -> dict:
@@ -651,6 +756,119 @@ def api_mesh_status() -> dict:
         "mask_ratio": mask_info.get("mask_ratio", 0.0),
         "last_error": str(STATE.get("last_error") or ""),
     }
+
+
+def region_status_payload() -> dict:
+    info = load_region_labelmap(REGION_LABELMAP_PATH)
+    return {
+        "synthseg_available": region_synthseg_available(),
+        "fastsurfer_available": fastsurfer_available(),
+        "labelmap_available": REGION_LABELMAP_PATH.exists(),
+        "labelmap_path": str(REGION_LABELMAP_PATH) if REGION_LABELMAP_PATH.exists() else "",
+        "target_mask_available": TARGET_MASK_PATH.exists(),
+        "target_mask_path": str(TARGET_MASK_PATH) if TARGET_MASK_PATH.exists() else "",
+        "status": info.get("status", "missing"),
+        "message": info.get("message", REGION_SEGMENTATION_DISABLED_MESSAGE),
+        "region_names": list(REGION_GROUPS.keys()),
+        "colors": REGION_COLORS,
+        "regions": info.get("regions", []),
+        "unique_labels": info.get("unique_labels", []),
+        "volumes_csv_path": str(REGION_VOLUMES_CSV_PATH) if REGION_VOLUMES_CSV_PATH.exists() else "",
+        "disabled_warning": ""
+        if REGION_LABELMAP_PATH.exists() or region_synthseg_available() or fastsurfer_available()
+        else REGION_SEGMENTATION_DISABLED_MESSAGE,
+    }
+
+
+def api_region_status() -> dict:
+    return {"ok": True, **region_status_payload()}
+
+
+def api_run_region_segmentation() -> dict:
+    mri_data = require_mri()
+    if not INPUT_NIFTI_PATH.exists():
+        save_input_nifti(mri_data)
+    input_path = BRAIN_ONLY_VOLUME_PATH if BRAIN_ONLY_VOLUME_PATH.exists() else INPUT_NIFTI_PATH
+    result = run_region_segmentation(input_path, REGION_LABELMAP_PATH, ROOT)
+    if result.get("ok"):
+        volumes = export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
+        result["volumes"] = volumes.get("regions", [])
+        result["volumes_csv_path"] = volumes.get("csv_path", "")
+        STATE["last_error"] = ""
+    else:
+        STATE["last_error"] = result.get("message", REGION_SEGMENTATION_DISABLED_MESSAGE)
+    return {**result, "region_status": region_status_payload()}
+
+
+def api_load_regions() -> dict:
+    info = load_region_labelmap(REGION_LABELMAP_PATH)
+    if info.get("ok"):
+        csv_result = export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
+        info["volumes_csv_path"] = csv_result.get("csv_path", "")
+        info["regions"] = csv_result.get("regions", info.get("regions", []))
+    else:
+        STATE["last_error"] = info.get("message", "Label map missing.")
+    return info
+
+
+def api_build_region_mesh(query: dict[str, list[str]]) -> dict:
+    region_name = first(query, "region", "Cerebrum")
+    if region_name == "Target Region/Tumor":
+        if not TARGET_MASK_PATH.exists():
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "target_mask.nii.gz not found. Target/tumor segmentation requires a separate model or manual mask.",
+                "mesh_path": None,
+            }
+        output_path = REGION_MESH_DIR / "target_region_tumor.glb"
+        result = build_mesh_from_mask(TARGET_MASK_PATH, output_path)
+        result.update({"region_name": region_name, "reliable_for_3d": False, "debug_only": False})
+        return result
+    if not REGION_LABELMAP_PATH.exists():
+        return {
+            "ok": False,
+            "status": "missing",
+            "message": "Label map not found. Run region segmentation or load outputs/regions_labelmap.nii.gz.",
+            "mesh_path": None,
+        }
+    output_path = REGION_MESH_DIR / f"{slugify_region(region_name)}.glb"
+    result = build_region_mesh(REGION_LABELMAP_PATH, region_name, output_path)
+    if result.get("ok"):
+        export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
+        STATE["last_error"] = ""
+    else:
+        STATE["last_error"] = result.get("message", "Region mesh generation failed.")
+    return result
+
+
+def api_build_all_region_meshes() -> dict:
+    if not REGION_LABELMAP_PATH.exists():
+        return {
+            "ok": False,
+            "status": "missing",
+            "message": "Label map not found. Run region segmentation or load outputs/regions_labelmap.nii.gz.",
+            "results": [],
+        }
+    results = []
+    for region_name in REGION_GROUPS:
+        if region_name == "Whole brain":
+            continue
+        output_path = REGION_MESH_DIR / f"{slugify_region(region_name)}.glb"
+        results.append(build_region_mesh(REGION_LABELMAP_PATH, region_name, output_path))
+    export_result = export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
+    ok = any(item.get("ok") for item in results)
+    return {
+        "ok": ok,
+        "status": "ready" if ok else "failed",
+        "message": "Region meshes built." if ok else "No region mesh could be generated.",
+        "results": results,
+        "volumes_csv_path": export_result.get("csv_path", ""),
+    }
+
+
+def api_export_region_volumes() -> dict:
+    return export_region_volumes_csv(REGION_LABELMAP_PATH, REGION_VOLUMES_CSV_PATH, REGION_MESH_DIR)
 
 
 def api_build_mesh(query: dict[str, list[str]]) -> dict:
@@ -822,6 +1040,8 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
         "brain_only_mesh.glb",
         "brain_only.nii.gz",
         "brain_mask_source.json",
+        "regions_labelmap.nii.gz",
+        "region_volumes.csv",
         "filled_brain_mask.nii.gz",
         "refined_brain_mask.nii.gz",
         "fallback_preview_mask.nii.gz",
@@ -831,10 +1051,12 @@ def clear_mask_cache(output_dir: Path) -> list[Path]:
         "brain_overlay.png",
         "debug_mask_overlay.png",
     }
-    patterns = ("*.png", "*.npy", "*.glb", "*mask*.nii.gz", "*mask*.npz")
+    patterns = ("*.png", "*.npy", "*.glb", "*.csv", "*mask*.nii.gz", "*labelmap*.nii.gz", "*mask*.npz")
     targets: set[Path] = {output_dir / name for name in names}
     for pattern in patterns:
         targets.update(output_dir.glob(pattern))
+    if REGION_MESH_DIR.exists():
+        targets.update(REGION_MESH_DIR.glob("*.glb"))
 
     removed: list[Path] = []
     for path in sorted(targets, key=lambda item: str(item).lower()):
@@ -1555,7 +1777,46 @@ def draw_slice_png(image: np.ndarray, mask_slice: np.ndarray | None = None) -> b
     return buffer.getvalue()
 
 
-def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
+def render_region_overlay_png(mri_data: MRIData, labelmap_path: Path, query: dict[str, list[str]]) -> bytes:
+    normalized = require_normalized()
+    plane = first(query, "plane", str(mri_data.info.get("Plane", "sagittal"))).lower()
+    max_index = plane_length(mri_data.volume, plane) - 1
+    index = max(0, min(int(first(query, "index", str(max_index // 2))), max_index))
+    region_name = first(query, "region", "Cerebrum")
+    mode = first(query, "mode", "selected")
+    image = slice_from_plane(normalized, plane, index)
+    labelmap, _ = load_labelmap_array(labelmap_path)
+    label_slice = slice_from_plane(labelmap, plane, index)
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=120)
+    ax.imshow(image, cmap="gray", vmin=0, vmax=1)
+    rgba = np.zeros((*label_slice.shape, 4), dtype=np.float32)
+    if mode == "all":
+        for region, label_ids in REGION_GROUPS.items():
+            if region == "Whole brain":
+                continue
+            binary = np.isin(label_slice, label_ids)
+            rgba[binary] = (*hex_to_rgb_float(REGION_COLORS.get(region, "#94a3b8")), 0.42)
+    else:
+        label_ids = REGION_GROUPS.get(region_name, [])
+        binary = np.isin(label_slice, label_ids)
+        rgba[binary] = (*hex_to_rgb_float(REGION_COLORS.get(region_name, "#94a3b8")), 0.48)
+    ax.imshow(rgba)
+    ax.axis("off")
+    fig.tight_layout(pad=0)
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def hex_to_rgb_float(color: str) -> tuple[float, float, float]:
+    text = str(color).strip().lstrip("#")
+    if len(text) != 6:
+        return (0.58, 0.64, 0.72)
+    return tuple(int(text[index : index + 2], 16) / 255.0 for index in (0, 2, 4))  # type: ignore[return-value]
+
+
+def mesh_to_figure(mesh: BrainMesh, color: str = "lightgray", title: str = "") -> go.Figure:
     vertices = mesh.vertices
     faces = mesh.faces
     fig = go.Figure(
@@ -1567,19 +1828,58 @@ def mesh_to_figure(mesh: BrainMesh) -> go.Figure:
                 i=faces[:, 0],
                 j=faces[:, 1],
                 k=faces[:, 2],
-                color="lightgray",
+                color=color,
                 opacity=1.0,
                 flatshading=False,
                 lighting=dict(ambient=0.5, diffuse=0.8, specular=0.1, roughness=0.6, fresnel=0.1),
             )
         ]
     )
-    fig.update_layout(
-        height=680,
-        margin=dict(l=0, r=0, t=0, b=0),
-        scene=dict(aspectmode="data", xaxis_title="", yaxis_title="", zaxis_title=""),
-    )
+    layout = {
+        "height": 680,
+        "margin": dict(l=0, r=0, t=0, b=0),
+        "scene": dict(aspectmode="data", xaxis_title="", yaxis_title="", zaxis_title=""),
+    }
+    if title:
+        layout["title"] = dict(text=title, x=0.02, y=0.98)
+    fig.update_layout(**layout)
     return fig
+
+
+def status_html(title: str, message: str) -> str:
+    safe_title = html_escape(title)
+    safe_message = html_escape(message)
+    return (
+        "<!doctype html><html><body style='margin:0;min-height:100vh;display:grid;place-items:center;"
+        "background:#f8fafc;color:#0f172a;font-family:system-ui,-apple-system,Segoe UI,sans-serif'>"
+        "<div style='width:min(560px,84%);border:1px solid rgba(15,23,42,.12);border-left:6px solid #f59e0b;"
+        "border-radius:8px;background:#fff;padding:22px 24px;box-shadow:0 18px 48px rgba(15,23,42,.10)'>"
+        f"<strong style='display:block;font-size:18px;margin-bottom:8px'>{safe_title}</strong>"
+        f"<span style='font-size:13px;color:#64748b'>{safe_message}</span>"
+        "</div></body></html>"
+    )
+
+
+def html_escape(value: object) -> str:
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def draw_status_png(message: str) -> bytes:
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=120)
+    ax.set_facecolor("#f8fafc")
+    ax.text(0.5, 0.5, message, ha="center", va="center", wrap=True, fontsize=11, color="#334155")
+    ax.axis("off")
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", bbox_inches="tight", pad_inches=0.2)
+    plt.close(fig)
+    return buffer.getvalue()
 
 
 def summarize_info(info: dict) -> dict:

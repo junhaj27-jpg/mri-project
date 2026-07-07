@@ -99,7 +99,60 @@ Remove-Item -Recurse -Force outputs\* -ErrorAction SilentlyContinue
 
 If Windows native HD-BET fails, use WSL2 Ubuntu, Docker, or SynthStrip.
 
-## 7. Git Commands
+## 7. Region Segmentation Flow
+
+Region segmentation requires SynthSeg or FastSurfer. Threshold-based region segmentation is disabled.
+
+Typical web-app flow:
+
+```text
+1. Load volume
+2. Run brain extraction
+3. Run region segmentation
+4. Select region
+5. Build selected region 3D
+6. Export region volumes CSV
+```
+
+Check region status:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/regions/status
+```
+
+Run SynthSeg/FastSurfer-backed region segmentation:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/regions/run
+```
+
+Build a selected region mesh:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/api/regions/build-mesh?region=Cerebrum"
+```
+
+Export region volumes:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/regions/export-volumes
+```
+
+Expected region outputs:
+
+```text
+outputs/regions_labelmap.nii.gz
+outputs/region_volumes.csv
+outputs/meshes/cerebrum.glb
+```
+
+Target/tumor regions are not generated automatically. To preview a manual/model target mask, place it here:
+
+```text
+outputs/target_mask.nii.gz
+```
+
+## 8. Git Commands
 
 ```powershell
 git status --short
@@ -108,7 +161,7 @@ git commit -m "your commit message"
 git push origin main
 ```
 
-## 8. Docker
+## 9. Docker
 
 ```powershell
 docker build -t brain-mri-viewer .
@@ -121,7 +174,7 @@ With local MRI data:
 docker run --rm -p 8501:8501 -v C:\Users\user\Desktop\mri2\mri-project-main\data:/data -e MRI_DATA_DIR=/data brain-mri-viewer
 ```
 
-## 9. Current Backend Layout
+## 10. Current Backend Layout
 
 ```text
 backend/server.py         main backend/frontend HTTP server
@@ -130,6 +183,6 @@ run_backend_frontend.py   server launcher
 frontend/                 HTML/CSS/JS frontend
 ```
 
-## 10. Reminder
+## 11. Reminder
 
 Viewer only. Not for diagnosis.

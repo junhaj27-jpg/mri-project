@@ -16,8 +16,11 @@ Core capabilities:
 - Preview axial, sagittal, and coronal MRI slices
 - Convert the selected DICOM volume to NIfTI
 - Run reliable skull stripping with HD-BET or SynthStrip when available
+- Run atlas/parcellation-based region segmentation with SynthSeg or FastSurfer label maps
 - Display binary brain-mask overlays only on `mask == true` pixels
+- Display region label overlays with separate colors for cerebrum, cerebellum, brainstem, ventricles, hippocampus, basal ganglia, thalamus, white matter, and gray matter
 - Generate final brain-only 3D mesh only from `outputs/brain_mask.nii.gz`
+- Generate selected-region 3D meshes only from `outputs/regions_labelmap.nii.gz`
 - Block final 3D output when only fallback/threshold/debug masks are available
 - Render a 3D preview in the browser and show explicit status messages when mesh generation is unavailable or fails
 
@@ -33,6 +36,7 @@ Core capabilities:
 | NIfTI I/O | `nibabel` |
 | Image processing | `numpy`, `scipy`, `scikit-image` |
 | Brain extraction | HD-BET, optional SynthStrip / FreeSurfer |
+| Region segmentation | SynthSeg label maps, optional FastSurfer label maps |
 | 3D mesh generation | `skimage.measure.marching_cubes`, `trimesh` |
 | 3D browser preview | Plotly `Mesh3d` embedded in the 3D Viewer |
 | Reports / documents | `reportlab` |
@@ -56,6 +60,14 @@ Selected DICOM series
     -> marching cubes on binary brain mask
     -> outputs/brain_only_mesh.glb
     -> /three-d preview
+
+Region segmentation
+    -> SynthSeg or FastSurfer label map
+    -> outputs/regions_labelmap.nii.gz
+    -> region volume table / CSV
+    -> selected region binary mask
+    -> outputs/meshes/{region}.glb
+    -> color-coded 2D and 3D region preview
 ```
 
 The project keeps the local backend and frontend intentionally simple. The main web app is served by `backend/server.py`; the original Streamlit MVP remains available in `app.py`.
@@ -96,6 +108,67 @@ If this condition is false, the 3D Viewer shows a clear status message instead o
 - `Mesh generation failed: {error}`
 
 This prevents threshold noise, skull/scalp/neck tissue, ellipse ROI masks, or unknown cached masks from being presented as final brain-only 3D results.
+
+## Region Segmentation / Parcellation
+
+Brain extraction and region segmentation are separate stages:
+
+- HD-BET/SynthStrip: whole-brain extraction and skull stripping
+- SynthSeg/FastSurfer: atlas/parcellation-based region label map generation
+
+The app never uses threshold, ellipse, or intensity fallback logic to split the brain into cerebrum, cerebellum, brainstem, hippocampus, ventricles, or basal ganglia. Region segmentation is enabled only when a valid label map exists:
+
+```text
+outputs/regions_labelmap.nii.gz
+```
+
+Supported region groups:
+
+- Cerebrum
+- Cerebellum
+- Brainstem
+- Ventricle
+- Hippocampus
+- Basal Ganglia
+- Thalamus
+- White Matter
+- Gray Matter
+
+Target/tumor regions are not generated automatically. A target or tumor overlay requires a separate tumor segmentation model or manual mask saved as:
+
+```text
+outputs/target_mask.nii.gz
+```
+
+Region workflow:
+
+1. Load volume.
+2. Run brain extraction.
+3. Run region segmentation.
+4. Load `outputs/regions_labelmap.nii.gz`.
+5. Select a region in the UI.
+6. Show selected-region or all-region 2D overlay.
+7. Build selected region 3D mesh.
+8. Export `outputs/region_volumes.csv`.
+
+Generated region outputs:
+
+```text
+outputs/regions_labelmap.nii.gz
+outputs/region_volumes.csv
+outputs/meshes/cerebrum.glb
+outputs/meshes/cerebellum.glb
+outputs/meshes/brainstem.glb
+outputs/meshes/ventricle.glb
+outputs/meshes/hippocampus.glb
+outputs/meshes/basal_ganglia.glb
+```
+
+If SynthSeg/FastSurfer is unavailable and no label map exists, the UI shows:
+
+```text
+Region segmentation requires SynthSeg or FastSurfer. Threshold-based region segmentation is disabled.
+```
 
 ## Current Data Path
 
