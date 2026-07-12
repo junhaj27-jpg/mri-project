@@ -1,523 +1,489 @@
-# AIDLC-MRI
+# Brain MRI 3D Visualization & Volume Measurement Web Service
 
-Local-first C-MRI 2D/3D viewer for portfolio and research-style visualization.
+## 1. 프로젝트 개요
 
-This project loads local DICOM MRI data, provides a 2D slice viewer, displays brain-mask overlays, and renders a browser-based 3D preview mesh. Final brain-only 3D remains gated behind reliable skull stripping, while fallback/debug masks are clearly labeled as preview-only and not for diagnosis.
+본 프로젝트는 Brain MRI 데이터를 기반으로 병변 또는 종양 의심 영역을 3D로 시각화하고, segmentation mask를 활용하여 부피를 cm³ 단위로 계산하는 연구용 웹 프로토타입입니다.
 
-> Viewer only. Not for diagnosis. Final medical decisions must follow a clinician's interpretation.
+MRI 원본 데이터를 의료 진단에 직접 사용하는 것이 아니라, DICOM/NIfTI 기반 의료영상 데이터를 웹서비스에서 조회 가능한 형태로 변환하고, 2D 슬라이스 뷰어, 3D 모델 뷰어, 부피 계산 결과, 시점별 변화 추적 기능을 제공하는 것을 목표로 합니다.
 
-## GitHub About
+본 시스템은 의료진의 진단을 대체하지 않으며, 의료영상 분석 흐름을 이해하고 구현하기 위한 포트폴리오용 연구 프로젝트입니다.
 
-Suggested repository description:
+---
 
-```text
-Local-first C-MRI 2D/3D viewer with DICOM slice preview, brain-mask overlays, and debug/final 3D mesh workflows.
+## 2. 프로젝트 목표
+
+본 프로젝트의 핵심 목표는 다음과 같습니다.
+
+* Brain MRI CD/DICOM 데이터를 분석 가능한 구조로 정리
+* MRI 데이터를 NIfTI 또는 내부 분석 포맷으로 변환
+* MRI 슬라이스를 웹에서 확인할 수 있는 2D 뷰어 구현
+* 병변 또는 종양 의심 영역의 segmentation mask 기반 부피 계산
+* mask 데이터를 3D mesh 모델로 변환
+* PC 및 모바일 브라우저에서 3D 모델 확인
+* 시점별 MRI 부피 변화량 및 변화율 확인
+* 민감 의료영상 데이터 보호를 고려한 원격 PC 기반 분석 구조 설계
+
+---
+
+## 3. 주요 기능
+
+### 3.1 MRI 데이터 목록 관리
+
+MRI 촬영 시점을 `T01 ~ T12`와 같은 비식별 라벨로 관리합니다.
+실제 환자번호, 병원명, 촬영일은 공개 저장소에 포함하지 않습니다.
+
+예시 분류:
+
+| 구간        | 의미                              |
+| --------- | ------------------------------- |
+| T01 ~ T04 | 외과적 수술 관련 MRI 추적 구간             |
+| T04 ~ T05 | 병원 또는 장비 변경 구간                  |
+| T05 ~ T07 | 항암제 치료 시점 인접 구간                 |
+| T08 이후    | 감마나이프 수술 이후 장기 추적 구간            |
+| T09 ~ T12 | 큰 변화가 없는 stable follow-up 예상 구간 |
+
+단, 모든 치료 이벤트 정보는 의료적 판정이 아니라 데이터 분류를 위한 참고 라벨로만 사용합니다.
+
+---
+
+### 3.2 2D MRI 슬라이스 뷰어
+
+MRI 데이터를 슬라이스 단위로 확인할 수 있는 웹 기반 2D 뷰어를 제공합니다.
+
+* MRI 대표 슬라이스 확인
+* preview image 표시
+* mask overlay image 표시
+* PC 브라우저 기반 확인
+* 추후 모바일 대응 가능
+
+---
+
+### 3.3 병변 부피 계산
+
+segmentation mask를 기준으로 병변 또는 종양 의심 영역의 부피를 계산합니다.
+
+계산 방식:
+
+```txt
+volume_cm3 = mask_voxel_count × spacing_x × spacing_y × spacing_z / 1000
 ```
 
-Suggested topics:
+여기서 spacing 값은 MRI voxel의 실제 크기(mm)를 의미합니다.
+계산 결과는 cm³ 단위로 표시합니다.
 
-```text
-mri, dicom, medical-imaging, brain-mri, python, pydicom, nifti, trimesh, marching-cubes, threejs, portfolio-project
+---
+
+### 3.4 3D 모델 생성 및 웹 뷰어
+
+mask 데이터를 기반으로 marching cubes 알고리즘을 적용하여 3D mesh 모델을 생성합니다.
+
+생성된 모델은 웹과 모바일 브라우저에서 확인할 수 있도록 `.glb` 형식으로 제공하는 것을 목표로 합니다.
+
+지원 목표:
+
+* 3D 모델 회전
+* 확대/축소
+* 모바일 터치 조작
+* 부피 결과 동시 표시
+* 시점별 3D 모델 선택
+
+---
+
+### 3.5 시점별 변화 추적
+
+여러 MRI 시점의 부피 결과를 비교하여 변화량과 변화율을 계산합니다.
+
+예시:
+
+| 시점  | 구간                         | 부피(cm³) |   변화량 |    변화율 |
+| --- | -------------------------- | ------: | ----: | -----: |
+| T01 | surgery_follow_up          |    42.3 |     - |      - |
+| T04 | surgery_follow_up          |    41.8 |  -0.5 | -1.18% |
+| T05 | hospital_transition        |    42.0 | 비교 주의 |  비교 주의 |
+| T08 | post_gamma_knife_follow_up |    39.4 |  -2.6 | -6.19% |
+| T12 | recent_follow_up           |    38.9 |  -0.5 | -1.27% |
+
+T04~T05 구간은 병원 또는 장비 변경 가능성이 있으므로 직접적인 치료 효과 판단 구간으로 사용하지 않습니다.
+
+---
+
+## 4. 시스템 구조
+
+본 프로젝트는 원본 의료영상 데이터를 외부 서버에 업로드하지 않고, 원격 PC를 분석 서버로 활용하는 구조를 기준으로 설계했습니다.
+
+```txt
+사용자 PC / 모바일
+        ↓
+FastAPI Web Server
+        ↓
+원격 PC 기반 분석 환경
+        ├─ 원본 MRI CD/DICOM 보관
+        ├─ NIfTI 변환
+        ├─ 슬라이스 이미지 생성
+        ├─ segmentation mask 관리
+        ├─ 부피 계산
+        ├─ 3D mesh 모델 생성
+        └─ 분석 결과 JSON 저장
 ```
 
-## Screenshots
+GitHub에는 코드와 샘플 메타데이터만 공개하며, 원본 MRI 파일은 포함하지 않습니다.
 
-![C-MRI 3D Viewer with brain-mask overlay and debug surface preview](docs/screenshots/cmri-3d-viewer-mask-debug-preview.png)
+---
 
-### Page Gallery
+## 5. 폴더 구조
 
-| Page | Screenshot |
-| --- | --- |
-| Login | ![AIDLC-MRI login page](docs/screenshots/login-page.png) |
-| Dashboard | ![AIDLC-MRI dashboard page](docs/screenshots/dashboard-page.png) |
-| Authenticated dashboard | ![AIDLC-MRI authenticated dashboard page](docs/screenshots/dashboard-authenticated-page.png) |
-| Studies | ![AIDLC-MRI DICOM studies page](docs/screenshots/studies-page.png) |
-| 2D Viewer | ![AIDLC-MRI 2D viewer page with brain mask overlay](docs/screenshots/two-d-viewer-page.png) |
-| Volume | ![AIDLC-MRI volume summary page](docs/screenshots/volume-page.png) |
-| 3D Viewer | ![AIDLC-MRI 3D viewer page](docs/screenshots/three-d-viewer-page.png) |
-| AI Assist | ![AIDLC-MRI AI assist page](docs/screenshots/ai-assist-page.png) |
-| Guide | ![AIDLC-MRI guide page](docs/screenshots/guide-page.png) |
-| Admin users | ![AIDLC-MRI admin user management page](docs/screenshots/admin-users-page.png) |
-
-## Project Summary
-
-AIDLC-MRI is a local-first MRI viewer focused on private brain MRI visualization. It is designed to demonstrate a practical medical-imaging workflow without uploading patient data to an external service.
-
-## Implemented Features
-
-- Load and group local DICOM brain MRI series
-- Preview axial, sagittal, and coronal MRI slices
-- Load selected DICOM series into a backend 3D volume
-- Return 2D slice PNGs from backend MRI slice APIs
-- Convert the selected DICOM volume to NIfTI
-- Display grayscale slices with brain-mask overlay enabled by default
-- Show metadata such as source, shape, spacing, series, mask source, mask ratio, mask unique values, and mask status
-- Generate fallback/debug brain masks when reliable tools are unavailable
-- Generate preview-only debug 3D meshes from fallback masks with explicit warnings
-- Export debug preview meshes to `frontend/static/meshes/debug_brain_preview.glb`
-- Render debug preview meshes as solid surface previews in the 3D Viewer
-- Keep final 3D mesh generation disabled until a reliable mask is available
-- Run reliable skull stripping with HD-BET or SynthStrip when available
-- Display binary brain-mask overlays only on `mask == true` pixels
-- Render a 3D preview in the browser and show explicit status messages when mesh generation or GLB loading is unavailable or fails
-
-## Experimental / Preview Features
-
-- Debug mask generation from threshold/largest-component fallback logic
-- Debug 3D preview mesh for portfolio/demo use only
-- Canvas solid-surface fallback when external Three.js modules cannot be loaded
-- Atlas/parcellation-based region segmentation with SynthSeg or FastSurfer label maps
-- Display region label overlays with separate colors for cerebrum, cerebellum, brainstem, ventricles, hippocampus, basal ganglia, thalamus, white matter, and gray matter
-- Generate final brain-only 3D mesh only from `outputs/brain_mask.nii.gz`
-- Generate selected-region 3D meshes only from `outputs/regions_labelmap.nii.gz`
-- Region volume export and selected-region 3D mesh workflows
-
-## Tech Stack
-
-| Area | Technologies |
-| --- | --- |
-| Language | Python 3.12, JavaScript, HTML, CSS |
-| Local backend | Python `http.server` via `ThreadingHTTPServer` |
-| MVP UI | Streamlit |
-| Web frontend | Vanilla HTML/CSS/JavaScript |
-| DICOM loading | `pydicom` |
-| NIfTI I/O | `nibabel` |
-| Image processing | `numpy`, `scipy`, `scikit-image` |
-| Brain extraction | HD-BET, optional SynthStrip / FreeSurfer |
-| Region segmentation | SynthSeg label maps, optional FastSurfer label maps |
-| 3D mesh generation | `skimage.measure.marching_cubes`, `trimesh` |
-| 3D browser preview | Three.js `GLTFLoader` for GLB surface meshes, with a local canvas surface fallback when external modules are unavailable |
-| Legacy/debug mesh plot | Plotly `Mesh3d` remains available through `/api/mesh_plot` |
-| Reports / documents | `reportlab` |
-| Version control | Git, GitHub |
-| OS target | Windows PowerShell local workflow |
-
-## Architecture Overview
-
-```text
-Local DICOM data
-    -> mri_loader.py
-    -> backend/server.py API
-    -> frontend/*.html + frontend/static/js
-    -> 2D slice preview / mask overlay / 3D preview
-
-Selected DICOM series
-    -> outputs/input.nii.gz
-    -> HD-BET or SynthStrip
-    -> outputs/brain_mask.nii.gz
-    -> outputs/brain_only.nii.gz
-    -> marching cubes on binary brain mask
-    -> outputs/brain_only_mesh.glb
-    -> /three-d preview
-
-Debug preview path
-    -> fallback/debug brain mask
-    -> marching cubes on binary debug mask
-    -> frontend/static/meshes/debug_brain_preview.glb
-    -> /three-d preview with Preview only / Not for diagnosis warning
-
-Region segmentation
-    -> SynthSeg or FastSurfer label map
-    -> outputs/regions_labelmap.nii.gz
-    -> region volume table / CSV
-    -> selected region binary mask
-    -> outputs/meshes/{region}.glb
-    -> color-coded 2D and 3D region preview
+```txt
+mri-3d-web/
+├─ backend/
+│  ├─ main.py
+│  ├─ database.py
+│  ├─ models.py
+│  └─ routers/
+│     ├─ studies.py
+│     ├─ analysis.py
+│     └─ tracking.py
+│
+├─ frontend/
+│  ├─ index.html
+│  ├─ studies.html
+│  ├─ viewer.html
+│  ├─ volume.html
+│  ├─ three_d.html
+│  └─ static/
+│     ├─ css/
+│     │  └─ style.css
+│     └─ js/
+│        ├─ api.js
+│        ├─ studies.js
+│        ├─ viewer.js
+│        ├─ volume.js
+│        └─ three_viewer.js
+│
+├─ media/
+│  ├─ slices/
+│  ├─ overlays/
+│  ├─ models/
+│  └─ reports/
+│
+├─ sample_data/
+│  ├─ metadata_sample.csv
+│  ├─ tracking_sample.csv
+│  └─ result_sample.json
+│
+├─ db/
+│  └─ mri_analysis.db
+│
+├─ requirements.txt
+├─ README.md
+└─ .gitignore
 ```
 
-The project keeps the local backend and frontend intentionally simple. The main web app is served by `backend/server.py`; the original Streamlit MVP remains available in `app.py`.
+---
 
-## Brain Mask And 3D Pipeline
+## 6. 원본 MRI 데이터 보관 구조
 
-The 3D pipeline is intentionally conservative:
+원본 MRI CD/DICOM 파일은 GitHub에 업로드하지 않고, 로컬 또는 원격 PC의 private 경로에만 보관합니다.
 
-1. Load selected DICOM series.
-2. Save the current volume as `outputs/input.nii.gz`.
-3. Try reliable skull stripping with SynthStrip or HD-BET.
-4. Save the reliable binary mask as `outputs/brain_mask.nii.gz`.
-5. Save `outputs/brain_only.nii.gz` as `original_volume * brain_mask`.
-6. Render 2D overlays only where `brain_mask > 0.5`.
-7. Build final 3D mesh only from `brain_mask.astype(float)` with `marching_cubes(level=0.5)`.
-8. Export final mesh to `outputs/brain_only_mesh.glb`.
+예시:
 
-Fallback threshold masks are allowed only for debugging and portfolio/demo preview. They are marked as `debug_only` or `invalid_threshold_noise` and can create `frontend/static/meshes/debug_brain_preview.glb` for preview-only rendering. They cannot create final `brain_only_mesh.glb`.
-
-## 3D Viewer Reliability Rules
-
-Final 3D generation is enabled only when:
-
-```python
-reliable_mask = (
-    mask_source in ["synthstrip", "hd-bet", "cached_brain_mask"]
-    and mask_status == "valid"
-    and outputs/brain_mask.nii.gz exists
-)
+```txt
+C:\mri_data\
+├─ raw_private\
+│  ├─ T01_cd_original
+│  ├─ T02_cd_original
+│  ├─ T03_cd_original
+│  └─ ...
+│
+├─ encrypted\
+├─ nifti\
+├─ slices\
+├─ masks\
+├─ models\
+├─ reports\
+└─ db\
 ```
 
-If this condition is false, final 3D generation remains disabled. The 3D Viewer can still generate a clearly labeled debug preview mesh when a fallback/debug mask exists:
+각 CD 원본은 그대로 보존하고, 분석용 데이터는 NIfTI, PNG, mask, GLB, JSON 형태로 별도 생성합니다.
 
-- `No mesh generated yet`
-- `Preview mesh not generated yet. Click Generate Preview 3D.`
-- `Debug brain mask detected. Preview 3D mesh can be generated, but final medical brain-only 3D is disabled.`
-- `Building 3D mesh...`
-- `GLB surface mesh ready`
-- `Canvas surface fallback ready`
-- `GLB load failed`
-- `Mesh generation failed: {error}`
+---
 
-This prevents threshold noise, skull/scalp/neck tissue, ellipse ROI masks, or unknown cached masks from being presented as final brain-only 3D results. Debug preview meshes are always labeled `Preview only` and `Not for diagnosis`.
+## 7. 데이터 보호 정책
 
-## Region Segmentation / Parcellation
+본 프로젝트는 개인 의료영상 데이터를 다루는 구조를 고려하여 다음 원칙을 적용합니다.
 
-Brain extraction and region segmentation are separate stages:
+* 원본 DICOM/MRI 파일은 GitHub에 업로드하지 않음
+* 실제 환자번호, 이름, 생년월일, 촬영일, 병원명은 공개하지 않음
+* MRI 시점은 `T01`, `T02`와 같은 비식별 라벨로 관리
+* 병원 정보는 `HOSP_A`, `HOSP_B`와 같은 가명으로 관리
+* 원본 파일은 로컬 또는 원격 PC의 private 폴더에만 보관
+* 외부 공개용 저장소에는 코드, 샘플 메타데이터, 샘플 결과 JSON만 포함
+* 분석 결과는 의료적 진단이 아닌 연구용 분석 보조 결과로 표시
 
-- HD-BET/SynthStrip: whole-brain extraction and skull stripping
-- SynthSeg/FastSurfer: atlas/parcellation-based region label map generation
+---
 
-The app never uses threshold, ellipse, or intensity fallback logic to split the brain into cerebrum, cerebellum, brainstem, hippocampus, ventricles, or basal ganglia. Region segmentation is enabled only when a valid label map exists:
+## 8. 데이터베이스 설계 방향
 
-```text
-outputs/regions_labelmap.nii.gz
+MRI 원본 파일 자체는 DB에 저장하지 않습니다.
+DB에는 파일 경로, 비식별 메타데이터, 분석 결과만 저장합니다.
+
+저장 대상:
+
+* patient_code
+* study_label
+* study_order
+* hospital_group
+* event_type
+* raw_path
+* nifti_path
+* slice_dir
+* mask_path
+* model_3d_path
+* volume_cm3
+* analysis_status
+* created_at
+
+저장하지 않는 정보:
+
+* 실제 환자번호
+* 실제 이름
+* 실제 촬영일
+* 주민등록번호
+* 원본 DICOM 파일 자체
+* 암호 또는 비밀번호
+
+---
+
+## 9. 기술 스택
+
+### Backend
+
+* Python
+* FastAPI
+* SQLite
+* SQLAlchemy
+* Pydantic
+
+### Medical Image Processing
+
+* pydicom
+* nibabel
+* SimpleITK
+* NumPy
+* OpenCV
+* scikit-image
+* trimesh
+
+### Frontend
+
+* HTML
+* CSS
+* JavaScript
+* Three.js
+* GLTFLoader
+* 반응형 웹 구조
+
+### Security / Data Handling
+
+* cryptography
+* local encrypted backup
+* `.gitignore` 기반 민감 파일 제외
+
+---
+
+## 10. 실행 방법
+
+### 10.1 가상환경 생성
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
-Supported region groups:
+### 10.2 패키지 설치
 
-- Cerebrum
-- Cerebellum
-- Brainstem
-- Ventricle
-- Hippocampus
-- Basal Ganglia
-- Thalamus
-- White Matter
-- Gray Matter
-
-Target/tumor regions are not generated automatically. A target or tumor overlay requires a separate tumor segmentation model or manual mask saved as:
-
-```text
-outputs/target_mask.nii.gz
+```bash
+pip install -r requirements.txt
 ```
 
-Region workflow:
+### 10.3 서버 실행
 
-1. Load volume.
-2. Run brain extraction.
-3. Run region segmentation.
-4. Load `outputs/regions_labelmap.nii.gz`.
-5. Select a region in the UI.
-6. Show selected-region or all-region 2D overlay.
-7. Build selected region 3D mesh.
-8. Export `outputs/region_volumes.csv`.
-
-Generated region outputs:
-
-```text
-outputs/regions_labelmap.nii.gz
-outputs/region_volumes.csv
-outputs/meshes/cerebrum.glb
-outputs/meshes/cerebellum.glb
-outputs/meshes/brainstem.glb
-outputs/meshes/ventricle.glb
-outputs/meshes/hippocampus.glb
-outputs/meshes/basal_ganglia.glb
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-If SynthSeg/FastSurfer is unavailable and no label map exists, the UI shows:
+### 10.4 PC에서 접속
 
-```text
-Region segmentation requires SynthSeg or FastSurfer. Threshold-based region segmentation is disabled.
-```
-
-## Current Data Path
-
-The default local data folder is:
-
-```text
-C:\Users\user\Desktop\mri2\mri-project-main\data
-```
-
-The app scans this folder recursively and groups DICOM files by series.
-
-## Main Screens
-
-- Login: local account sign-in before accessing MRI data
-- Dashboard: project overview and quick links
-- Studies: DICOM series list grouped into study-style rows
-- 2D Viewer: grayscale MRI slice viewer with plane and slice controls
-- Volume: mock longitudinal volume tracking plus current brain-mask volume summary
-- 3D Viewer: brain mesh preview based on available brain mask
-- AI Assist: skull-stripping, mask, mesh, and overlay status summary
-- Guide: Korean usage guide for the viewer workflow
-- Admin: administrator-only user creation and account overview
-
-## Local Web App
-
-Run the backend/frontend server:
-
-```powershell
-.\.venv\Scripts\python.exe run_backend_frontend.py
-```
-
-Open:
-
-```text
+```txt
 http://127.0.0.1:8000
 ```
 
-Useful pages:
+### 10.5 같은 와이파이 모바일에서 접속
 
-```text
-http://127.0.0.1:8000/login
-http://127.0.0.1:8000/studies
-http://127.0.0.1:8000/viewer
-http://127.0.0.1:8000/volume
-http://127.0.0.1:8000/three-d
-http://127.0.0.1:8000/ai
-http://127.0.0.1:8000/guide
-http://127.0.0.1:8000/admin
+원격 PC의 IP 확인:
+
+```bash
+ipconfig
 ```
 
-See [COMMANDS.md](COMMANDS.md) for a compact command reference.
+예시:
 
-## Streamlit App
-
-The original Streamlit MVP is still available:
-
-```powershell
-.\.venv\Scripts\streamlit.exe run app.py --server.port 8501
+```txt
+http://192.168.0.15:8000
 ```
 
-Open:
+3D 뷰어 접속:
 
-```text
-http://127.0.0.1:8501
+```txt
+http://192.168.0.15:8000/three-d
 ```
 
-## Install Dependencies
+---
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+## 11. 주요 화면
+
+| 페이지        | 설명             |
+| ---------- | -------------- |
+| `/`        | 프로젝트 소개 및 대시보드 |
+| `/studies` | MRI 시점 목록      |
+| `/viewer`  | 2D MRI 슬라이스 뷰어 |
+| `/volume`  | 부피 계산 결과       |
+| `/three-d` | 3D 병변 모델 뷰어    |
+
+---
+
+## 12. API 예시
+
+### MRI 목록 조회
+
+```txt
+GET /api/studies
 ```
 
-Optional brain extraction tools:
+### 분석 결과 조회
 
-- HD-BET
-- SynthStrip / FreeSurfer
-
-See [INSTALL.md](INSTALL.md) for HD-BET and SynthStrip notes.
-
-HD-BET can be installed into the project virtualenv:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install hd-bet
+```txt
+GET /api/analysis/{study_label}
 ```
 
-The local web app checks HD-BET with:
+예시:
 
-```powershell
-.\.venv\Scripts\python.exe -c "import HD_BET; print('HD_BET installed')"
+```txt
+GET /api/analysis/T08
 ```
 
-## Backend API
+### 시점별 추적 결과 조회
 
-The local web frontend uses these endpoints:
+```txt
+GET /api/tracking/P001
+```
 
-- `GET /health`
-- `GET /api/project-summary`
-- `GET /api/status`
-- `GET /api/series`
-- `GET /api/studies`
-- `GET /api/load`
-- `GET /api/slice`
-- `GET /api/mri/metadata`
-- `GET /api/mri/slice`
-- `GET /api/mri/slice/{plane}`
-- `GET /api/slice-info`
-- `GET /api/mask`
-- `GET /api/rebuild_mask`
-- `GET /api/clear_outputs`
-- `GET /api/run_hdbet`
-- `GET /api/mesh`
-- `GET /api/mesh_plot`
-- `GET /api/mri/mesh/debug-preview`
-- `POST /api/mri/mesh/debug-preview`
-- `GET /api/mri/mesh/debug-preview/status`
-- `GET /api/threejs_viewer`
-- `GET /api/mesh-status`
-- `GET /api/tracking`
-- `GET /api/volume-result`
-- `GET /api/ai-results`
+---
 
-## MRI Processing Notes
-
-- DICOM series are sorted by `InstanceNumber`.
-- Pixel data is loaded through `pydicom.pixel_array`.
-- Orientation is inferred from DICOM metadata and series description.
-- 2D display uses grayscale windowed slice rendering.
-- ROI area uses `PixelSpacing`.
-- ROI/brain volume calculations use slice spacing or slice thickness when available.
-
-## Brain-Only 3D Policy
-
-Final brain-only 3D mesh generation should use a reliable skull-stripping result:
-
-- SynthStrip mask
-- HD-BET mask
-
-Simple threshold fallback is debug-only. It must not be treated as final brain-only 3D output.
-
-The app treats a mask as reliable only when all of these are true:
-
-- `mask_source` is `synthstrip`, `hd-bet`, or `cached_brain_mask`
-- `mask_status` is `valid`
-- `outputs/brain_mask.nii.gz` exists
-- `reliable_mask` is `true`
-
-Fallback threshold, cached unknown, ellipse/ROI/debug masks are always unreliable. If a reliable mask is not available, final 3D generation returns:
+## 13. 분석 결과 JSON 예시
 
 ```json
 {
-  "ok": false,
-  "status": "debug_only",
-  "message": "SynthStrip or HD-BET brain mask is required for final 3D brain mesh.",
-  "mesh_path": null
+  "patient_code": "P001",
+  "study_label": "T08",
+  "event_type": "post_gamma_knife_follow_up",
+  "volume_cm3": 39.4,
+  "change_cm3": -2.6,
+  "change_rate_percent": -6.19,
+  "model_3d_url": "/media/models/P001/T08/lesion_model.glb",
+  "preview_url": "/media/slices/P001/T08/preview_slice.png",
+  "overlay_url": "/media/overlays/P001/T08/overlay.png",
+  "notice": "본 결과는 의료진 진단을 대체하지 않는 연구용 분석 보조 결과입니다."
 }
 ```
 
-Final 3D mesh generation runs marching cubes only on `outputs/brain_mask.nii.gz`. It does not run marching cubes on the original MRI intensity volume or threshold fallback mask.
+---
 
-## HD-BET Workflow
+## 14. `.gitignore` 정책
 
-On the 3D Viewer page:
+원본 MRI와 분석 결과 파일은 GitHub에 올리지 않습니다.
 
-```text
-http://127.0.0.1:8000/three-d
+```gitignore
+.venv/
+__pycache__/
+*.pyc
+
+# DB
+*.db
+db/
+
+# private MRI data
+mri_data/
+raw_private/
+encrypted/
+decrypted_test/
+
+# medical image files
+*.dcm
+*.nii
+*.nii.gz
+*.npy
+*.npz
+
+# generated media
+media/uploads/
+media/processed/
+media/slices/
+media/overlays/
+media/masks/
+media/models/
+media/reports/
+
+# encrypted files
+*.enc
+
+# OS
+.DS_Store
+Thumbs.db
 ```
 
-Use these buttons:
+---
 
-- `Load volume`: load the selected DICOM series.
-- `Clear outputs`: remove generated masks, meshes, NIfTI files, and overlay PNGs from `outputs/`.
-- `Rebuild mask`: clear mask/mesh cache and reset mask state.
-- `Run HD-BET`: convert the current DICOM series to `outputs/input.nii.gz`, run HD-BET, and save `outputs/brain_mask.nii.gz`.
-- `Build final 3D mesh`: create `outputs/brain_only_mesh.glb` only when the HD-BET/SynthStrip mask is reliable.
+## 15. 구현 범위
 
-The app first tries the requested command style:
+현재 목표는 의료기기 수준의 진단 시스템이 아니라, 다음 범위의 연구용 프로토타입입니다.
 
-```powershell
-python -m HD_BET.run -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu -mode fast
-```
+포함 범위:
 
-For installed `hd-bet` versions that expose `HD_BET.entry_point` instead of `HD_BET.run`, it falls back to:
+* MRI CD/DICOM 데이터 관리 구조 설계
+* NIfTI 변환 기반 분석 구조
+* 2D 슬라이스 확인
+* segmentation mask 기반 부피 계산
+* 3D 모델 생성 및 웹 뷰어
+* PC/모바일 반응형 화면
+* 시점별 부피 변화 추적
+* 원본 의료영상 비공개 구조
 
-```powershell
-python -m HD_BET.entry_point -i outputs/input.nii.gz -o outputs/brain_only.nii.gz -device cpu --disable_tta --save_bet_mask
-```
+제외 범위:
 
-The app then searches HD-BET mask outputs such as:
+* 의료 진단 자동화
+* 암 확정 판정
+* 치료 효과 확정
+* 완치 또는 재발 여부 판단
+* PACS/EMR 직접 연동
+* 의료기기 인허가 수준 검증
 
-```text
-outputs/brain_only_mask.nii.gz
-outputs/brain_only_bet.nii.gz
-outputs/input_mask.nii.gz
-outputs/input_bet.nii.gz
-outputs/*mask*.nii.gz
-outputs/*_mask.nii.gz
-outputs/*_bet.nii.gz
-```
+---
 
-When a valid HD-BET mask is found, it is copied/saved as:
+## 16. 포트폴리오 설명
 
-```text
-outputs/brain_mask.nii.gz
-```
+본 프로젝트는 실제 Brain MRI 데이터 관리 흐름을 바탕으로, 민감 의료영상 데이터를 외부 클라우드에 업로드하지 않고 원격 PC 기반 분석 환경에서 처리하는 구조를 설계했습니다.
 
-The preview overlay is then drawn from this binary mask only.
+MRI 원본은 로컬 private 저장소에 보관하고, 웹서비스에서는 비식별화된 시점 라벨, 분석 결과 JSON, 3D 모델, 부피 계산 결과만 표시합니다.
 
-## Output Files
+이를 통해 의료영상 데이터 처리, FastAPI 백엔드, Three.js 기반 3D 시각화, voxel 기반 부피 계산, 반응형 웹 구현, 민감정보 보호 설계를 함께 경험할 수 있도록 구성했습니다.
 
-Common generated outputs:
+---
 
-```text
-outputs/brain_mask.nii.gz
-outputs/brain_mask_source.json
-outputs/input.nii.gz
-outputs/brain_only.nii.gz
-outputs/brain_only_bet.nii.gz
-outputs/brain_only_mesh.glb
-outputs/brain_overlay.png
-outputs/brain_overlay_axial.png
-outputs/brain_overlay_sagittal.png
-outputs/brain_overlay_coronal.png
-```
+## 17. 주의사항
 
-Availability depends on the selected processing path and installed skull-stripping tools.
+본 프로젝트는 연구용 및 포트폴리오용 프로토타입입니다.
 
-Debug-only fallback outputs may include:
+본 시스템의 분석 결과는 의료진의 진단을 대체하지 않으며, 실제 진단, 치료 효과 판정, 완치 또는 재발 여부 판단에 사용할 수 없습니다.
 
-```text
-outputs/fallback_preview_mask.nii.gz
-outputs/debug_mask_mesh.glb
-outputs/debug_mask_overlay.png
-outputs/debug_mask_overlay_axial.png
-outputs/debug_mask_overlay_sagittal.png
-outputs/debug_mask_overlay_coronal.png
-frontend/static/meshes/debug_brain_preview.glb
-frontend/static/meshes/debug_brain_preview.json
-```
-
-These debug outputs are not final brain extraction results.
-
-## Repository Structure
-
-```text
-app.py                    Streamlit MVP
-backend/server.py         Local backend/frontend HTTP server
-backend_server.py         Compatibility wrapper for older run commands
-run_backend_frontend.py   Starts the local web app server
-mri_loader.py             DICOM/NIfTI loading
-preprocessing.py          Normalization and slice helpers
-brain_mask.py             Fallback mask/refinement logic
-skull_stripping.py        SynthStrip/HD-BET integration helpers
-mesh_builder.py           Marching cubes and mesh export
-report.py                 PDF report helpers
-frontend/                 Dashboard, viewer, 3D, studies, volume, AI pages
-docs/screenshots/         README screenshots
-utils/                    DICOM helper loader
-outputs/                  Generated masks and meshes
-```
-
-## Verification
-
-Recent local verification:
-
-- `/studies` loads DICOM series rows.
-- `/volume` renders T01 to T14 mock tracking rows.
-- `/ai` renders mask/mesh readiness checks.
-- `/viewer` loads backend PNG slices and shows brain-mask overlay by default.
-- `/api/mri/metadata` returns volume shape and spacing.
-- `/api/mri/slice?plane=sagittal&overlay=true` returns `image/png`.
-- `/api/mri/mesh/debug-preview` generates `frontend/static/meshes/debug_brain_preview.glb`.
-- `/static/meshes/debug_brain_preview.glb` returns `200` with `Content-Type: model/gltf-binary`.
-- `/three-d` shows the masked slice preview and a solid debug 3D surface preview.
-- Final 3D remains disabled unless `reliable_mask=true`.
-- Threshold fallback remains `invalid_threshold_noise` / debug-only and cannot create final medical brain-only 3D output.
-
-## Docker
-
-```powershell
-docker build -t brain-mri-viewer .
-docker run --rm -p 8501:8501 brain-mri-viewer
-```
-
-With local data mounted:
-
-```powershell
-docker run --rm -p 8501:8501 -v C:\Users\user\Desktop\mri2\mri-project-main\data:/data -e MRI_DATA_DIR=/data brain-mri-viewer
-```
-
-## Medical Disclaimer
-
-This is not a diagnostic medical device.
-
-It is a portfolio/MVP viewer for visual confirmation, research-style demonstration, and local MRI data exploration. It does not replace clinical interpretation, radiology workflow, or physician review.
+원본 MRI 파일과 개인 의료정보는 공개 저장소에 포함하지 않습니다.
+# mri-project
