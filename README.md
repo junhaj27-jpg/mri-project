@@ -1,5 +1,45 @@
 # Brain MRI 3D Visualization & Volume Measurement Web Service
 
+## Screen Preview
+
+### Login
+
+![Login](docs/screen-design/assets/01-login.png)
+
+### Dashboard
+
+![Dashboard 1](docs/screen-design/assets/02-dashboard-1.png)
+
+![Dashboard 2](docs/screen-design/assets/03-dashboard-2.png)
+
+### Studies
+
+![Studies](docs/screen-design/assets/04-studies.png)
+
+### 2D Viewer
+
+![2D Viewer](docs/screen-design/assets/05-2d-viewer.png)
+
+### Volume
+
+![Volume](docs/screen-design/assets/06-volume.png)
+
+### 3D Viewer
+
+![3D Viewer](docs/screen-design/assets/07-3d-viewer.png)
+
+### AI Assist
+
+![AI Assist](docs/screen-design/assets/08-ai-assist.png)
+
+### Guide
+
+![Guide](docs/screen-design/assets/09-guide.png)
+
+### Admin
+
+![Admin](docs/screen-design/assets/10-admin.png)
+
 ## 1. 프로젝트 개요
 
 본 프로젝트는 Brain MRI 데이터를 기반으로 병변 또는 종양 의심 영역을 3D로 시각화하고, segmentation mask를 활용하여 부피를 cm³ 단위로 계산하는 연구용 웹 프로토타입입니다.
